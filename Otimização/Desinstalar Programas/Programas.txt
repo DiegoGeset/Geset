@@ -1,0 +1,5 @@
+# ================================================
+# Script: Verificar e (opcionalmente) Desinstalar Aplicativo
+# Uso: Execute pelo run-elevado.bat para garantir elevação
+# Observação: Resposta para desinstalar deve ser S ou N (aceita maiúscula/minúscula)
+# ================================================

@@ -1,0 +1,6 @@
+Realiza a configuração dos planos de energia da Bateria.
+
+1 º - Restaura configuração padrão do plano de energia
+2 º - Ativa o plano de Alto desempenho.
+3 º - Remove para nunca suspender, desligar video e disco rigido (Computador)
+4 º - Remove para nunca suspender, desligar video e disco rigido (Notebook)

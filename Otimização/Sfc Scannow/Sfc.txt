@@ -1,0 +1,4 @@
+# ================================================
+# Script: Verificação de Integridade do Sistema
+# Função: Executar "sfc /scannow" como administrador
+# ================================================

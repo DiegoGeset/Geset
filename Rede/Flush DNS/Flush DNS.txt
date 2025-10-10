@@ -1,0 +1,5 @@
+# ======================================================
+# Script: Limpeza de Cache DNS
+# Função: Garante execução como Administrador e limpa DNS
+# Autor: Diego Geset
+# ======================================================

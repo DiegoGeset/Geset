@@ -1,0 +1,5 @@
+# ==========================================================
+# Script: Gerenciador de Contas Locais
+# Função: Permite habilitar ou desabilitar usuários locais
+#         com menu interativo e verificação de privilégios.
+# ==========================================================

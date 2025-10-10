@@ -1,0 +1,5 @@
+# ================================================
+# Script: Impressoras.ps1
+# Descrição: Lista, remove ou recupera impressoras (incluindo virtuais)
+# Execução: Sempre como Administrador
+# ================================================

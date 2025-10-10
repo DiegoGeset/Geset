@@ -1,0 +1,6 @@
+# ============================================================
+# Script: Atualizar-Windows.ps1
+# Função: Lista e instala atualizações do Windows de forma automática
+# Autor: Diego Geset
+# Compatibilidade: Windows 10, 11, Server 2016+
+# ============================================================

@@ -1,0 +1,5 @@
+===========================================================
+ Script: PadronizacaoIconesAreaDeTrabalho.ps1
+ Descrição: Permite escolher quais ícones padrão da área
+            de trabalho serão exibidos para todos os usuários
+===========================================================

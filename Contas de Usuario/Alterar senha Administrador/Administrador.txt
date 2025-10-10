@@ -1,0 +1,5 @@
+# ==========================================================
+# Script: Gerenciar Usuário "Administrator"
+# Função: Cria ou reativa o usuário Administrator,
+#         define senha personalizada e aplica políticas
+# ==========================================================
