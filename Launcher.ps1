@@ -1,6 +1,6 @@
 # ===============================
 # GESET Launcher - Interface WPF (Tema Escuro + Ocultação e Elevação)
-# + Sincronização silenciosa com GitHub (C:\Geset)
+# + Sincronização silenciosa com GitHub -> C:\Geset
 # ===============================
 
 # --- Oculta a janela do PowerShell ---
@@ -33,24 +33,23 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # ===============================
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
-# Mantém a variável original para compatibilidade com logo, etc.
+# mantém caminho do launcher (para logo.png etc)
 $BasePath = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
 # ===============================
-# Variáveis GitHub / Cache local
+# Variáveis GitHub e Cache local
 # ===============================
-$LocalCache = "C:\Geset"                                    # pasta local que será sincronizada
+$LocalCache = "C:\Geset"
 $GitHubContentsBase = "https://api.github.com/repos/DiegoGeset/Geset/contents"
 $GitHubRawBase = "https://raw.githubusercontent.com/DiegoGeset/Geset/main"
 if (-not (Test-Path $LocalCache)) { New-Item -Path $LocalCache -ItemType Directory -Force | Out-Null }
 
-$Global:GitHubHeaders = @{ 'User-Agent' = 'GESET-Launcher' }  # GitHub requires User-Agent header
+$Global:GitHubHeaders = @{ 'User-Agent' = 'GESET-Launcher' }  # GitHub exige User-Agent
 
 # ===============================
 # Funções de sincronização / utilitárias
 # ===============================
 
-# Calcula git-blob SHA1 local (compatível com 'sha' da API)
 function Get-LocalGitBlobSha1 {
     param([string]$FilePath)
     if (-not (Test-Path $FilePath)) { return $null }
@@ -68,7 +67,6 @@ function Get-LocalGitBlobSha1 {
     } catch { return $null }
 }
 
-# Faz download silencioso se necessário (compara SHA se informado)
 function Download-FromUrlIfNeeded {
     param(
         [string]$DownloadUrl,
@@ -92,7 +90,6 @@ function Download-FromUrlIfNeeded {
         try {
             Invoke-WebRequest -Uri $DownloadUrl -OutFile $LocalPath -Headers $Global:GitHubHeaders -UseBasicParsing -ErrorAction Stop
         } catch {
-            # silencioso - não quebrar o launcher
             Write-Host "Falha ao baixar $DownloadUrl" -ForegroundColor Yellow
         }
     }
@@ -100,25 +97,30 @@ function Download-FromUrlIfNeeded {
     return $LocalPath
 }
 
-# Chama a API /contents para um caminho relativo ao repo ("" para root)
 function Get-GitHubContents {
     param([string]$RelativePath)
     try {
-        $url = if ($RelativePath) { "$GitHubContentsBase/$([System.Uri]::EscapeDataString($RelativePath))" } else { $GitHubContentsBase }
+        if ([string]::IsNullOrEmpty($RelativePath)) {
+            $url = $GitHubContentsBase
+        } else {
+            # escapando cada segmento para lidar com espaços/acento
+            $segments = $RelativePath -split '/'
+            $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
+            $url = "$GitHubContentsBase/" + ($escaped -join '/')
+        }
         return Invoke-RestMethod -Uri $url -Headers $Global:GitHubHeaders -ErrorAction Stop
     } catch {
         return $null
     }
 }
 
-# Sincroniza: percorre categories -> subfolders -> arquivos (.ps1/.exe) e baixa para C:\Geset
+# sincroniza: percorre categorias -> subpastas -> baixa .ps1/.exe para C:\Geset
 function Sync-GitHubToLocal {
     $allLocalScripts = @()
 
-    # 1) obtém categorias (root directories)
     $root = Get-GitHubContents -RelativePath ""
     if (-not $root) {
-        # API falhou — tentar fallback para cache local
+        # fallback: lista local existente
         try {
             $cats = Get-ChildItem -Path $LocalCache -Directory -ErrorAction SilentlyContinue
             foreach ($c in $cats) {
@@ -135,7 +137,6 @@ function Sync-GitHubToLocal {
     $categories = $root | Where-Object { $_.type -eq "dir" } | ForEach-Object { $_.name }
 
     foreach ($category in $categories) {
-        # get subfolders
         $catJson = Get-GitHubContents -RelativePath $category
         if (-not $catJson) { continue }
         $subfolders = $catJson | Where-Object { $_.type -eq "dir" } | ForEach-Object { $_.name }
@@ -145,25 +146,25 @@ function Sync-GitHubToLocal {
             $subJson = Get-GitHubContents -RelativePath $subRel
             if (-not $subJson) { continue }
 
-            # procura primeiro arquivo .ps1 (mesmo comportamento original)
-            $ps1File = $subJson | Where-Object { $_.type -eq "file" -and $_.name -like "*.ps1" } | Select-Object -First 1
-            # ou aceita .exe também, se houver
-            if (-not $ps1File) {
-                $ps1File = $subJson | Where-Object { $_.type -eq "file" -and $_.name -like "*.exe" } | Select-Object -First 1
+            # procura por .ps1 (primeiro) ou .exe
+            $fileItem = $subJson | Where-Object { $_.type -eq "file" -and $_.name -like "*.ps1" } | Select-Object -First 1
+            if (-not $fileItem) { $fileItem = $subJson | Where-Object { $_.type -eq "file" -and $_.name -like "*.exe" } | Select-Object -First 1 }
+            if (-not $fileItem) { 
+                # mesmo que não existam scripts nessa subpasta, garantimos que a pasta local exista
+                $ensureLocalDir = Join-Path $LocalCache ($category + "\" + $sub)
+                if (-not (Test-Path $ensureLocalDir)) { New-Item -Path $ensureLocalDir -ItemType Directory -Force | Out-Null }
+                continue 
             }
-            if (-not $ps1File) { continue }
 
-            # montar caminhos locais e URLs
-            $downloadUrl = $ps1File.download_url
-            $remoteSha = $ps1File.sha
+            $downloadUrl = $fileItem.download_url
+            $remoteSha = $fileItem.sha
             $localDir = Join-Path $LocalCache ($category + "\" + $sub)
             if (-not (Test-Path $localDir)) { New-Item -Path $localDir -ItemType Directory -Force | Out-Null }
-            $localFile = Join-Path $localDir $ps1File.name
+            $localFile = Join-Path $localDir $fileItem.name
 
-            # download substituindo automaticamente se necessário
+            # baixa/substitui silenciosamente
             Download-FromUrlIfNeeded -DownloadUrl $downloadUrl -LocalPath $localFile -ExpectedSha $remoteSha
 
-            # armazenar para UI
             $allLocalScripts += @{ Category = $category; Sub = $sub; LocalScript = $localFile }
         }
     }
@@ -396,7 +397,7 @@ $titleText.Foreground = "#FFFFFF"
 $shadowEffect.Color = [System.Windows.Media.Colors]::LightBlue
 
 # ===============================
-# Função para carregar categorias e scripts
+# Função para carregar categorias e scripts (a partir de C:\Geset)
 # ===============================
 $ScriptCheckBoxes = @{}
 
@@ -404,33 +405,12 @@ function Load-Tabs {
     $tabControl.Items.Clear()
     $ScriptCheckBoxes.Clear()
 
-    # Sincroniza silenciosamente com o GitHub e obtém a lista de scripts locais (Category/Sub/LocalScript)
-    $localScripts = Sync-GitHubToLocal
+    # sempre usa o conteúdo local de C:\Geset (que foi sincronizado anteriormente)
+    $categories = Get-ChildItem -Path $LocalCache -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @("Logs") }
 
-    # Se sincronização não retornou nada, tenta montar lista a partir do cache local
-    if (-not $localScripts -or $localScripts.Count -eq 0) {
-        try {
-            $localScripts = @()
-            $cats = Get-ChildItem -Path $LocalCache -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @("Logs") }
-            foreach ($c in $cats) {
-                $subs = Get-ChildItem -Path $c.FullName -Directory -ErrorAction SilentlyContinue
-                foreach ($s in $subs) {
-                    $psFile = Get-ChildItem -Path $s.FullName -Filter *.ps1 -File -ErrorAction SilentlyContinue | Select-Object -First 1
-                    if ($psFile) {
-                        $localScripts += @{ Category = $c.Name; Sub = $s.Name; LocalScript = $psFile.FullName }
-                    }
-                }
-            }
-        } catch {}
-    }
-
-    # Agrupa por categoria para montar as abas (mantendo comportamento original)
-    $grouped = $localScripts | Group-Object -Property Category
-
-    foreach ($grp in $grouped) {
-        $category = $grp.Name
+    foreach ($category in $categories) {
         $tab = New-Object System.Windows.Controls.TabItem
-        $tab.Header = $category
+        $tab.Header = $category.Name
 
         $border = New-Object System.Windows.Controls.Border
         $border.BorderThickness = "1"
@@ -452,12 +432,10 @@ function Load-Tabs {
         $scrollViewer.Content = $panel
         $border.Child = $scrollViewer
 
-        foreach ($entry in $grp.Group) {
-            $sub = $entry.Sub
-            $localScript = $entry.LocalScript
-
-            if (Test-Path $localScript) {
-                # --- CORREÇÃO: Alinhamento vertical consistente ---
+        $subfolders = Get-ChildItem -Path $category.FullName -Directory -ErrorAction SilentlyContinue
+        foreach ($sub in $subfolders) {
+            $scriptFile = Get-ChildItem -Path $sub.FullName -Filter *.ps1 -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($scriptFile) {
                 $sp = New-Object System.Windows.Controls.StackPanel
                 $sp.Orientation = "Horizontal"
                 $sp.Margin = "0,0,0,8"
@@ -474,16 +452,16 @@ function Load-Tabs {
                 $chk = New-Object System.Windows.Controls.CheckBox
                 $chk.VerticalAlignment = "Center"
                 $chk.Margin = "0,0,8,0"
-                $chk.Tag = $localScript
-                $ScriptCheckBoxes[$localScript] = $chk
+                $chk.Tag = $scriptFile.FullName
+                $ScriptCheckBoxes[$scriptFile.FullName] = $chk
                 [System.Windows.Controls.Grid]::SetColumn($chk, 0)
 
                 $btn = New-Object System.Windows.Controls.Button
-                $btn.Content = $sub
+                $btn.Content = $sub.Name
                 $btn.Width = 200
                 $btn.Height = 32
                 $btn.Style = $roundedButtonStyle
-                $btn.Tag = $localScript
+                $btn.Tag = $scriptFile.FullName
                 $btn.VerticalAlignment = "Center"
                 Add-HoverShadow $btn
                 [System.Windows.Controls.Grid]::SetColumn($btn, 1)
@@ -495,7 +473,7 @@ function Load-Tabs {
                 $infoBtn.Margin = "8,0,0,0"
                 $infoBtn.Style = $roundedButtonStyle
                 $infoBtn.Background = "#1E90FF"
-                $infoBtn.Tag = $localScript
+                $infoBtn.Tag = $scriptFile.FullName
                 $infoBtn.VerticalAlignment = "Center"
                 Add-HoverShadow $infoBtn
                 [System.Windows.Controls.Grid]::SetColumn($infoBtn, 2)
@@ -509,7 +487,7 @@ function Load-Tabs {
                 $btn.Add_Click({ Run-ScriptElevated $this.Tag })
                 $infoBtn.Add_Click({
                     $infoText = Get-InfoText $this.Tag
-                    Show-InfoWindow -title $sub -content $infoText
+                    Show-InfoWindow -title $sub.Name -content $infoText
                 })
             }
         }
@@ -603,13 +581,12 @@ $BtnRefresh.Add_Click({
     Sync-GitHubToLocal | Out-Null
     Load-Tabs
 })
-
 $BtnExit.Add_Click({ $window.Close() })
 
 # ===============================
 # Inicialização
 # ===============================
-# Faz sincronização inicial silenciosa e carrega as abas
+# sincroniza (silencioso) e carrega abas a partir de C:\Geset
 Sync-GitHubToLocal | Out-Null
 Load-Tabs
 $window.ShowDialog() | Out-Null
