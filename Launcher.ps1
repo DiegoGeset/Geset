@@ -1,4 +1,4 @@
-﻿# ===============================
+# ===============================
 # GESET Launcher - Interface WPF (Tema Escuro + Ocultação e Elevação)
 # ===============================
 
@@ -32,11 +32,36 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # ===============================
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
-$BasePath = Split-Path -Parent $MyInvocation.MyCommand.Definition
+# Caminho base (GitHub)
+$GitHubBaseUrl = "https://raw.githubusercontent.com/DiegoGeset/Geset/main"
+# Caminho local temporário
+$BasePath = "C:\Geset"
+if (-not (Test-Path $BasePath)) { New-Item -Path $BasePath -ItemType Directory | Out-Null }
 
 # ===============================
 # Funções utilitárias
 # ===============================
+function Download-FromGitHub {
+    param(
+        [string]$RelativePath
+    )
+    $url = "$GitHubBaseUrl/$RelativePath"
+    $localPath = Join-Path $BasePath $RelativePath
+
+    $folder = Split-Path $localPath -Parent
+    if (-not (Test-Path $folder)) { New-Item -Path $folder -ItemType Directory -Force | Out-Null }
+
+    if (-not (Test-Path $localPath)) {
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $localPath -UseBasicParsing -ErrorAction Stop
+        } catch {
+            Write-Host "Falha ao baixar $url"
+        }
+    }
+
+    return $localPath
+}
+
 function Run-ScriptElevated($scriptPath) {
     if (-not (Test-Path $scriptPath)) {
         [System.Windows.MessageBox]::Show("Arquivo não encontrado: $scriptPath", "Erro", "OK", "Error")
@@ -241,20 +266,20 @@ $window.Background = "#0A1A33"
 $tabControl.Background = "#102A4D"
 $titleText.Foreground = "#FFFFFF"
 $shadowEffect.Color = [System.Windows.Media.Colors]::LightBlue
-
 # ===============================
-# Função para carregar categorias e scripts
+# Função para carregar categorias e scripts do GitHub
 # ===============================
 $ScriptCheckBoxes = @{}
 function Load-Tabs {
     $tabControl.Items.Clear()
     $ScriptCheckBoxes.Clear()
 
-    $categories = Get-ChildItem -Path $BasePath -Directory | Where-Object { $_.Name -notin @("Logs") }
+    # Estrutura fixa de categorias conforme o repositório
+    $categories = @("Contas de Usuario", "Limpeza", "Otimizacao", "Rede", "Seguranca", "Atualizacoes")
 
     foreach ($category in $categories) {
         $tab = New-Object System.Windows.Controls.TabItem
-        $tab.Header = $category.Name
+        $tab.Header = $category
 
         $border = New-Object System.Windows.Controls.Border
         $border.BorderThickness = "1"
@@ -276,11 +301,20 @@ function Load-Tabs {
         $scrollViewer.Content = $panel
         $border.Child = $scrollViewer
 
-        $subfolders = Get-ChildItem -Path $category.FullName -Directory
-        foreach ($sub in $subfolders) {
-            $scriptFile = Get-ChildItem -Path $sub.FullName -Filter *.ps1 -File | Select-Object -First 1
-            if ($scriptFile) {
-                # --- CORREÇÃO: Alinhamento vertical consistente ---
+        # Subpastas dentro de cada categoria
+        $subfoldersUrl = "$GitHubBaseUrl/$category"
+        try {
+            # Busca lista de subpastas via API HTML simples
+            $html = Invoke-WebRequest -Uri $subfoldersUrl -UseBasicParsing
+            $matches = ($html.Links | Where-Object { $_.href -match "/DiegoGeset/Geset/tree/main/$category/" }).href
+            $subs = $matches | ForEach-Object { ($_ -split '/')[-1] } | Sort-Object -Unique
+        } catch { $subs = @() }
+
+        foreach ($sub in $subs) {
+            $ps1Path = "$category/$sub/$sub.ps1"
+            $localScript = Download-FromGitHub $ps1Path
+
+            if (Test-Path $localScript) {
                 $sp = New-Object System.Windows.Controls.StackPanel
                 $sp.Orientation = "Horizontal"
                 $sp.Margin = "0,0,0,8"
@@ -297,16 +331,16 @@ function Load-Tabs {
                 $chk = New-Object System.Windows.Controls.CheckBox
                 $chk.VerticalAlignment = "Center"
                 $chk.Margin = "0,0,8,0"
-                $chk.Tag = $scriptFile.FullName
-                $ScriptCheckBoxes[$scriptFile.FullName] = $chk
+                $chk.Tag = $localScript
+                $ScriptCheckBoxes[$localScript] = $chk
                 [System.Windows.Controls.Grid]::SetColumn($chk, 0)
 
                 $btn = New-Object System.Windows.Controls.Button
-                $btn.Content = $sub.Name
+                $btn.Content = $sub
                 $btn.Width = 200
                 $btn.Height = 32
                 $btn.Style = $roundedButtonStyle
-                $btn.Tag = $scriptFile.FullName
+                $btn.Tag = $localScript
                 $btn.VerticalAlignment = "Center"
                 Add-HoverShadow $btn
                 [System.Windows.Controls.Grid]::SetColumn($btn, 1)
@@ -318,7 +352,7 @@ function Load-Tabs {
                 $infoBtn.Margin = "8,0,0,0"
                 $infoBtn.Style = $roundedButtonStyle
                 $infoBtn.Background = "#1E90FF"
-                $infoBtn.Tag = $scriptFile.FullName
+                $infoBtn.Tag = $localScript
                 $infoBtn.VerticalAlignment = "Center"
                 Add-HoverShadow $infoBtn
                 [System.Windows.Controls.Grid]::SetColumn($infoBtn, 2)
@@ -332,7 +366,7 @@ function Load-Tabs {
                 $btn.Add_Click({ Run-ScriptElevated $this.Tag })
                 $infoBtn.Add_Click({
                     $infoText = Get-InfoText $this.Tag
-                    Show-InfoWindow -title $sub.Name -content $infoText
+                    Show-InfoWindow -title $sub -content $infoText
                 })
             }
         }
@@ -423,7 +457,6 @@ $BtnExec.Add_Click({
 
 $BtnRefresh.Add_Click({ Load-Tabs })
 $BtnExit.Add_Click({ $window.Close() })
-
 # ===============================
 # Inicialização
 # ===============================
