@@ -32,21 +32,21 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # ===============================
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
-# Caminho base (GitHub)
-$GitHubApiBase = "https://api.github.com/repos/DiegoGeset/Geset/contents"
+# ----- Mantive a variável original ($BasePath) para compatibilidade com o restante do seu código (ex.: logo.png) -----
+$BasePath = Split-Path -Parent $MyInvocation.MyCommand.Definition
+
+# ===== Novas variáveis para GitHub e cache local (apenas aqui) =====
+$GitHubApiBase = "https://api.github.com/repos/DiegoGeset/Geset"
 $GitHubRawBase = "https://raw.githubusercontent.com/DiegoGeset/Geset/main"
-# Caminho local (cache)
-$BasePath = "C:\Geset"
-if (-not (Test-Path $BasePath)) { New-Item -Path $BasePath -ItemType Directory -Force | Out-Null }
+$LocalCache = "C:\Geset"
+if (-not (Test-Path $LocalCache)) { New-Item -Path $LocalCache -ItemType Directory -Force | Out-Null }
 
-# Cabeçalho para requisições
-$Global:GitHubHeaders = @{ 'User-Agent' = 'GESET-Launcher' }
+$Global:GitHubHeaders = @{ 'User-Agent' = 'GESET-Launcher' }  # GitHub exige User-Agent
 
 # ===============================
-# Funções utilitárias
+# Funções utilitárias (mantive suas existentes; adicionei sincronização GitHub abaixo)
 # ===============================
 
-# Calcula o git-blob SHA1 de um arquivo local (compatível com o campo 'sha' do GitHub API)
 function Get-LocalGitBlobSha1 {
     param([string]$FilePath)
     if (-not (Test-Path $FilePath)) { return $null }
@@ -62,7 +62,6 @@ function Get-LocalGitBlobSha1 {
     return $hex
 }
 
-# Faz download silencioso de uma URL (download_url da API) para o caminho local desejado
 function Download-FromUrlIfNeeded {
     param(
         [string]$DownloadUrl,
@@ -76,25 +75,29 @@ function Download-FromUrlIfNeeded {
     if (-not (Test-Path $LocalPath)) {
         $needDownload = $true
     } elseif ($ExpectedSha) {
-        $localSha = Get-LocalGitBlobSha1 -FilePath $LocalPath
-        if ($localSha -ne $ExpectedSha) { $needDownload = $true }
+        try {
+            $localSha = Get-LocalGitBlobSha1 -FilePath $LocalPath
+            if ($localSha -ne $ExpectedSha) { $needDownload = $true }
+        } catch {
+            $needDownload = $true
+        }
     }
 
     if ($needDownload) {
         try {
             Invoke-WebRequest -Uri $DownloadUrl -OutFile $LocalPath -Headers $Global:GitHubHeaders -ErrorAction Stop
         } catch {
-            # falha silenciosa (não quebrar o launcher)
+            # falha silenciosa — não quebrar o launcher
             Write-Host "Falha ao baixar $DownloadUrl" -ForegroundColor Yellow
         }
     }
+
     return $LocalPath
 }
 
-# Obtém conteúdo JSON do GitHub API para um caminho (pode ser root ou subpasta)
-function Get-GitHubApiJson {
-    param([string]$RelativePath)
-    $url = if ($RelativePath) { "$GitHubApiBase/$RelativePath" } else { "$GitHubApiBase" }
+function Get-GitHubTreeRecursive {
+    # usa a API de git trees para ter lista completa (recursiva)
+    $url = "$GitHubApiBase/git/trees/main?recursive=1"
     try {
         return Invoke-RestMethod -Uri $url -Headers $Global:GitHubHeaders -ErrorAction Stop
     } catch {
@@ -102,32 +105,62 @@ function Get-GitHubApiJson {
     }
 }
 
-# Converte caminho local (C:\Geset\...) para caminho relativo do repositório (substitui \ por /)
-function LocalPathToRepoRelative {
-    param([string]$LocalPath)
-    $rel = $LocalPath.Substring($BasePath.Length).TrimStart('\','/')
-    $rel = $rel -replace '\\','/'
-    return $rel
-}
+function Sync-GitHubToLocal {
+    # Sincroniza .ps1 do repositório para $LocalCache
+    $treeResp = Get-GitHubTreeRecursive
+    $allLocalScripts = @()
 
-# Lê a descrição (.txt) diretamente do GitHub (raw)
-function Get-InfoText {
-    param([string]$scriptPath)
-    # scriptPath: local path (C:\Geset\Categoria\Sub\Script.ps1)
-    $rel = LocalPathToRepoRelative -LocalPath $scriptPath
-    if (-not $rel) { return "Nenhuma documentação encontrada para este script." }
-    $txtRel = [System.IO.Path]::ChangeExtension($rel, ".txt")
-    $rawUrl = "$GitHubRawBase/$txtRel"
-    try {
-        $content = (Invoke-RestMethod -Uri $rawUrl -Headers $Global:GitHubHeaders -ErrorAction Stop)
-        if ($null -ne $content) { return $content.ToString() }
-    } catch {
-        # se houver falha, retorne mensagem padrão
+    if ($treeResp -and $treeResp.tree) {
+        # filtra blobs que terminam com .ps1
+        $ps1Blobs = $treeResp.tree | Where-Object { $_.type -eq "blob" -and $_.path -like "*.ps1" }
+
+        foreach ($blob in $ps1Blobs) {
+            # dividir path em segmentos
+            $segments = $blob.path -split '/'
+            if ($segments.Count -lt 3) { continue } # esperamos Category/Subfolder/Script.ps1 (no mínimo)
+            $category = $segments[0]
+            # pegamos o parent (pasta direta que contem o script) como subpasta (comportamento original)
+            $sub = $segments[-2]
+            $fileName = $segments[-1]
+
+            # montar local dir e arquivo
+            $localDir = Join-Path $LocalCache (Join-Path $category $sub)
+            if (-not (Test-Path $localDir)) { New-Item -Path $localDir -ItemType Directory -Force | Out-Null }
+            $localFile = Join-Path $localDir $fileName
+
+            # montar raw url corretamente escapando cada segmento (para lidar com espaços e caracteres especiais)
+            $escapedSegments = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
+            $rawRel = ($escapedSegments -join '/')
+            $rawUrl = "$GitHubRawBase/$rawRel"
+
+            # baixar se necessário (comparo SHA)
+            $expectedSha = $blob.sha
+            Download-FromUrlIfNeeded -DownloadUrl $rawUrl -LocalPath $localFile -ExpectedSha $expectedSha
+
+            # registrar para UI
+            $allLocalScripts += @{ Category = $category; Sub = $sub; LocalScript = $localFile }
+        }
+    } else {
+        # fallback: se API falhar, gera lista a partir do cache local existente
+        try {
+            $cats = Get-ChildItem -Path $LocalCache -Directory -ErrorAction SilentlyContinue
+            foreach ($c in $cats) {
+                $subdirs = Get-ChildItem -Path $c.FullName -Directory -ErrorAction SilentlyContinue
+                foreach ($s in $subdirs) {
+                    $ps1 = Get-ChildItem -Path $s.FullName -Filter *.ps1 -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($ps1) {
+                        $allLocalScripts += @{ Category = $c.Name; Sub = $s.Name; LocalScript = $ps1.FullName }
+                    }
+                }
+            }
+        } catch { }
     }
-    return "Nenhuma documentação encontrada para este script."
+
+    # (Opcional) limpeza: remover pastas locais vazias ou não listadas — deixei conservador (não remove arquivos)
+    return $allLocalScripts
 }
 
-# Mantém a assinatura original do seu script para execução elevada
+# Mantive sua função original, apenas ajustei para comportar o cache local
 function Run-ScriptElevated($scriptPath) {
     if (-not (Test-Path $scriptPath)) {
         [System.Windows.MessageBox]::Show("Arquivo não encontrado: $scriptPath", "Erro", "OK", "Error")
@@ -136,87 +169,65 @@ function Run-ScriptElevated($scriptPath) {
     Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
 }
 
-# Sincroniza repositório remoto (um nível: categorias -> subpastas) com C:\Geset
-function Sync-GitHubToLocal {
-    # 1) Obtém categorias (diretórios top-level do repositório)
-    $root = Get-GitHubApiJson -RelativePath ""
-    if (-not $root) { return @() } # falha ao acessar API
-
-    $categories = $root | Where-Object { $_.type -eq "dir" } | ForEach-Object { $_.name }
-
-    $allLocalScripts = @()
-
-    foreach ($category in $categories) {
-        # pula itens que não sejam pastas de categorias válidas (opcional: você pode adicionar filtros aqui)
-        # 2) lista subpastas da categoria
-        $categoryJson = Get-GitHubApiJson -RelativePath ([System.Uri]::EscapeUriString($category))
-        if (-not $categoryJson) { continue }
-
-        $subdirs = $categoryJson | Where-Object { $_.type -eq "dir" } | ForEach-Object { $_.name }
-
-        foreach ($sub in $subdirs) {
-            # 3) lista conteúdo da subpasta para encontrar .ps1 (ou arquivos com qualquer nome)
-            $subRel = "$category/$sub"
-            $subJson = Get-GitHubApiJson -RelativePath ([System.Uri]::EscapeUriString($subRel))
-            if (-not $subJson) { continue }
-
-            # procura por primeiro arquivo .ps1 (manter mesmo comportamento do original)
-            $ps1File = $subJson | Where-Object { $_.type -eq "file" -and $_.name -like "*.ps1" } | Select-Object -First 1
-            if (-not $ps1File) { continue }
-
-            $downloadUrl = $ps1File.download_url
-            $remoteSha = $ps1File.sha
-
-            $localPath = Join-Path $BasePath ($subRel -replace '/','\')
-            # cria pasta local se necessário
-            if (-not (Test-Path $localPath)) { New-Item -Path $localPath -ItemType Directory -Force | Out-Null }
-            $localFile = Join-Path $localPath $ps1File.name
-
-            # baixa ou atualiza conforme SHA
-            Download-FromUrlIfNeeded -DownloadUrl $downloadUrl -LocalPath $localFile -ExpectedSha $remoteSha
-
-            # registra para UI
-            $allLocalScripts += @{ Category = $category; Sub = $sub; LocalScript = $localFile }
-        }
-    }
-
-    # Limpeza silenciosa: remove arquivos/pastas locais que não existem mais no GitHub
+# Substitui Get-InfoText para ler do GitHub (raw) primeiro, senão usar local
+function Get-InfoText($scriptPath) {
+    # scriptPath: ex. C:\Geset\Contas de Usuario\Alterar Senha Administrador\Administrador.ps1
     try {
-        $remotePaths = $allLocalScripts | ForEach-Object {
-            (Join-Path $BasePath (($_.Category + "\" + $_.Sub)))  # folder paths that should exist
-        } | Sort-Object -Unique
-
-        $localCategoryFolders = Get-ChildItem -Path $BasePath -Directory -ErrorAction SilentlyContinue
-        foreach ($lc in $localCategoryFolders) {
-            $catPath = $lc.FullName
-            if ($remotePaths -notcontains $catPath) {
-                # se categoria remota não tem mais, remova silenciosamente
-                # removemos somente se a pasta estiver vazia ou se não houver arquivos .ps1 (seguro)
-                $ps1s = Get-ChildItem -Path $catPath -Recurse -Filter *.ps1 -File -ErrorAction SilentlyContinue
-                if (-not $ps1s) {
-                    Remove-Item -Path $catPath -Recurse -Force -ErrorAction SilentlyContinue
-                }
-            } else {
-                # dentro da categoria, verifique subpastas
-                $expectedSubFolders = $remotePaths | Where-Object { $_ -like "$catPath*" }
-                $localSubs = Get-ChildItem -Path $catPath -Directory -ErrorAction SilentlyContinue
-                foreach ($ls in $localSubs) {
-                    $fullSub = $ls.FullName
-                    if ($expectedSubFolders -notcontains $fullSub) {
-                        # mesma lógica de segurança: só remove se não houver .ps1 (padrão)
-                        $ps1s = Get-ChildItem -Path $fullSub -Recurse -Filter *.ps1 -File -ErrorAction SilentlyContinue
-                        if (-not $ps1s) {
-                            Remove-Item -Path $fullSub -Recurse -Force -ErrorAction SilentlyContinue
-                        }
-                    }
-                }
+        $rel = $scriptPath.Substring($LocalCache.Length).TrimStart('\','/')
+        if ($rel) {
+            $txtRel = [System.IO.Path]::ChangeExtension($rel, ".txt")
+            # escapar segmentos
+            $segments = $txtRel -split '/'
+            $escapedSegments = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
+            $rawUrl = "$GitHubRawBase/$($escapedSegments -join '/')"
+            try {
+                $content = Invoke-RestMethod -Uri $rawUrl -Headers $Global:GitHubHeaders -ErrorAction Stop
+                if ($content) { return $content.ToString() }
+            } catch {
+                # fallback para local
             }
         }
-    } catch {
-        # silencioso - não quebrar
-    }
+    } catch { }
 
-    return $allLocalScripts
+    # fallback: procura arquivo TXT local
+    $txtFile = [System.IO.Path]::ChangeExtension($scriptPath, ".txt")
+    if (Test-Path $txtFile) { return (Get-Content $txtFile -Raw) }
+    else { return "Nenhuma documentação encontrada para este script." }
+}
+
+function Show-InfoWindow($title, $content) {
+    $window = New-Object System.Windows.Window
+    $window.Title = "Informações - $title"
+    $window.Width = 600
+    $window.Height = 400
+    $window.WindowStartupLocation = 'CenterScreen'
+    $window.Background = "#1E1E1E"
+    $window.FontFamily = "Segoe UI"
+    $window.Foreground = "White"
+
+    $textBox = New-Object System.Windows.Controls.TextBox
+    $textBox.Text = $content
+    $textBox.Margin = 15
+    $textBox.TextWrapping = "Wrap"
+    $textBox.VerticalScrollBarVisibility = "Auto"
+    $textBox.IsReadOnly = $true
+    $textBox.FontSize = 14
+
+    $window.Content = $textBox
+    $window.ShowDialog() | Out-Null
+}
+
+function Add-HoverShadow($button) {
+    $button.Add_MouseEnter({
+        $shadow = New-Object System.Windows.Media.Effects.DropShadowEffect
+        $shadow.Color = [System.Windows.Media.Colors]::Black
+        $shadow.Opacity = 0.4
+        $shadow.BlurRadius = 15
+        $shadow.Direction = 320
+        $shadow.ShadowDepth = 4
+        $this.Effect = $shadow
+    })
+    $button.Add_MouseLeave({ $this.Effect = $null })
 }
 
 # ===============================
@@ -376,9 +387,10 @@ $titleText.Foreground = "#FFFFFF"
 $shadowEffect.Color = [System.Windows.Media.Colors]::LightBlue
 
 # ===============================
-# Função para carregar categorias e scripts (usando cache local sincronizado)
+# Função para carregar categorias e scripts
 # ===============================
 $ScriptCheckBoxes = @{}
+
 
 function Load-Tabs {
     $tabControl.Items.Clear()
@@ -420,6 +432,7 @@ function Load-Tabs {
             $localScript = $entry.LocalScript
 
             if (Test-Path $localScript) {
+                # --- CORREÇÃO: Alinhamento vertical consistente ---
                 $sp = New-Object System.Windows.Controls.StackPanel
                 $sp.Orientation = "Horizontal"
                 $sp.Margin = "0,0,0,8"
