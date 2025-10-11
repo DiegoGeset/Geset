@@ -1,5 +1,6 @@
 # ===============================
 # GESET Launcher - Interface WPF (Tema Escuro + Ocultação e Elevação)
+# Integrado com GitHub (sincronização silenciosa)
 # ===============================
 
 # --- Oculta a janela do PowerShell ---
@@ -32,34 +33,38 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # ===============================
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
-# ----- Mantive a variável original ($BasePath) para compatibilidade com o restante do seu código (ex.: logo.png) -----
+# Mantém $BasePath como no original (usa para logo.png etc)
 $BasePath = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-# ===== Novas variáveis para GitHub e cache local (apenas aqui) =====
-$GitHubApiBase = "https://api.github.com/repos/DiegoGeset/Geset"
+# ===== Novas variáveis GitHub / cache local (apenas adicionadas) =====
+$GitHubApiTree = "https://api.github.com/repos/DiegoGeset/Geset/git/trees/main?recursive=1"
 $GitHubRawBase = "https://raw.githubusercontent.com/DiegoGeset/Geset/main"
-$LocalCache = "C:\Geset"
+$LocalCache = "C:\Geset"                              # pasta local solicitada
 if (-not (Test-Path $LocalCache)) { New-Item -Path $LocalCache -ItemType Directory -Force | Out-Null }
 
-$Global:GitHubHeaders = @{ 'User-Agent' = 'GESET-Launcher' }  # GitHub exige User-Agent
+$Global:GitHubHeaders = @{ 'User-Agent' = 'GESET-Launcher' }  # GitHub requires User-Agent
 
 # ===============================
-# Funções utilitárias (mantive suas existentes; adicionei sincronização GitHub abaixo)
+# Funções utilitárias (mantive as suas e adicionei helpers)
 # ===============================
 
 function Get-LocalGitBlobSha1 {
     param([string]$FilePath)
     if (-not (Test-Path $FilePath)) { return $null }
-    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
-    $len = $bytes.Length
-    $header = [System.Text.Encoding]::ASCII.GetBytes("blob $len`0")
-    $combined = New-Object byte[] ($header.Length + $bytes.Length)
-    [Array]::Copy($header, 0, $combined, 0, $header.Length)
-    [Array]::Copy($bytes, 0, $combined, $header.Length, $bytes.Length)
-    $sha1 = [System.Security.Cryptography.SHA1]::Create()
-    $hash = $sha1.ComputeHash($combined)
-    $hex = ($hash | ForEach-Object { $_.ToString("x2") }) -join ''
-    return $hex
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+        $len = $bytes.Length
+        $header = [System.Text.Encoding]::ASCII.GetBytes("blob $len`0")
+        $combined = New-Object byte[] ($header.Length + $bytes.Length)
+        [Array]::Copy($header, 0, $combined, 0, $header.Length)
+        [Array]::Copy($bytes, 0, $combined, $header.Length, $bytes.Length)
+        $sha1 = [System.Security.Cryptography.SHA1]::Create()
+        $hash = $sha1.ComputeHash($combined)
+        $hex = ($hash | ForEach-Object { $_.ToString("x2") }) -join ''
+        return $hex
+    } catch {
+        return $null
+    }
 }
 
 function Download-FromUrlIfNeeded {
@@ -85,9 +90,10 @@ function Download-FromUrlIfNeeded {
 
     if ($needDownload) {
         try {
+            # silencioso - erros não interrompem o launcher
             Invoke-WebRequest -Uri $DownloadUrl -OutFile $LocalPath -Headers $Global:GitHubHeaders -ErrorAction Stop
         } catch {
-            # falha silenciosa — não quebrar o launcher
+            # fallback silencioso
             Write-Host "Falha ao baixar $DownloadUrl" -ForegroundColor Yellow
         }
     }
@@ -95,72 +101,75 @@ function Download-FromUrlIfNeeded {
     return $LocalPath
 }
 
-function Get-GitHubTreeRecursive {
-    # usa a API de git trees para ter lista completa (recursiva)
-    $url = "$GitHubApiBase/git/trees/main?recursive=1"
+function Get-GitHubTree {
     try {
-        return Invoke-RestMethod -Uri $url -Headers $Global:GitHubHeaders -ErrorAction Stop
+        return Invoke-RestMethod -Uri $GitHubApiTree -Headers $Global:GitHubHeaders -ErrorAction Stop
     } catch {
         return $null
     }
 }
 
+# Sincroniza o repositório: baixa/substitui .ps1 e .exe para C:\Geset (silencioso)
 function Sync-GitHubToLocal {
-    # Sincroniza .ps1 do repositório para $LocalCache
-    $treeResp = Get-GitHubTreeRecursive
-    $allLocalScripts = @()
+    # Retorna array de hashtables: @{ Category=...; Sub=...; LocalScript=... }
+    $result = @()
 
-    if ($treeResp -and $treeResp.tree) {
-        # filtra blobs que terminam com .ps1
-        $ps1Blobs = $treeResp.tree | Where-Object { $_.type -eq "blob" -and $_.path -like "*.ps1" }
-
-        foreach ($blob in $ps1Blobs) {
-            # dividir path em segmentos
-            $segments = $blob.path -split '/'
-            if ($segments.Count -lt 3) { continue } # esperamos Category/Subfolder/Script.ps1 (no mínimo)
-            $category = $segments[0]
-            # pegamos o parent (pasta direta que contem o script) como subpasta (comportamento original)
-            $sub = $segments[-2]
-            $fileName = $segments[-1]
-
-            # montar local dir e arquivo
-            $localDir = Join-Path $LocalCache (Join-Path $category $sub)
-            if (-not (Test-Path $localDir)) { New-Item -Path $localDir -ItemType Directory -Force | Out-Null }
-            $localFile = Join-Path $localDir $fileName
-
-            # montar raw url corretamente escapando cada segmento (para lidar com espaços e caracteres especiais)
-            $escapedSegments = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
-            $rawRel = ($escapedSegments -join '/')
-            $rawUrl = "$GitHubRawBase/$rawRel"
-
-            # baixar se necessário (comparo SHA)
-            $expectedSha = $blob.sha
-            Download-FromUrlIfNeeded -DownloadUrl $rawUrl -LocalPath $localFile -ExpectedSha $expectedSha
-
-            # registrar para UI
-            $allLocalScripts += @{ Category = $category; Sub = $sub; LocalScript = $localFile }
-        }
-    } else {
-        # fallback: se API falhar, gera lista a partir do cache local existente
+    $tree = Get-GitHubTree
+    if (-not $tree -or -not $tree.tree) {
+        # se falhou, apenas tenta usar o cache local existente
         try {
             $cats = Get-ChildItem -Path $LocalCache -Directory -ErrorAction SilentlyContinue
             foreach ($c in $cats) {
-                $subdirs = Get-ChildItem -Path $c.FullName -Directory -ErrorAction SilentlyContinue
-                foreach ($s in $subdirs) {
+                $subs = Get-ChildItem -Path $c.FullName -Directory -ErrorAction SilentlyContinue
+                foreach ($s in $subs) {
                     $ps1 = Get-ChildItem -Path $s.FullName -Filter *.ps1 -File -ErrorAction SilentlyContinue | Select-Object -First 1
                     if ($ps1) {
-                        $allLocalScripts += @{ Category = $c.Name; Sub = $s.Name; LocalScript = $ps1.FullName }
+                        $result += @{ Category = $c.Name; Sub = $s.Name; LocalScript = $ps1.FullName }
                     }
                 }
             }
-        } catch { }
+        } catch {}
+        return $result
     }
 
-    # (Opcional) limpeza: remover pastas locais vazias ou não listadas — deixei conservador (não remove arquivos)
-    return $allLocalScripts
+    # filtra somente blobs que são .ps1 ou .exe
+    $blobs = $tree.tree | Where-Object { $_.type -eq 'blob' -and ($_.path -match '\.ps1$' -or $_.path -match '\.exe$') }
+
+    foreach ($b in $blobs) {
+        # path example: "Contas de Usuario/Alterar Senha Administrador/Administrador.ps1"
+        $segments = $b.path -split '/'
+        if ($segments.Count -lt 3) { continue }   # espera Category/Subfolder/File.ext
+        $category = $segments[0]
+        $sub = $segments[-2]
+        $fileName = $segments[-1]
+
+        # montar local path e raw url (escapando segmentos)
+        $localDir = Join-Path $LocalCache (Join-Path $category $sub)
+        if (-not (Test-Path $localDir)) { New-Item -Path $localDir -ItemType Directory -Force | Out-Null }
+        $localFile = Join-Path $localDir $fileName
+
+        $escapedSegments = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
+        $rawRel = ($escapedSegments -join '/')
+        $rawUrl = "$GitHubRawBase/$rawRel"
+
+        # expected sha é $b.sha
+        $expectedSha = $b.sha
+
+        Download-FromUrlIfNeeded -DownloadUrl $rawUrl -LocalPath $localFile -ExpectedSha $expectedSha
+
+        $result += @{ Category = $category; Sub = $sub; LocalScript = $localFile }
+    }
+
+    # (Opcional/Conservador) não remove automaticamente arquivos locais que não existam no GitHub
+    # (poderíamos implementar limpeza, mas deixei conservador para não apagar nada sem confirmação)
+
+    return $result
 }
 
-# Mantive sua função original, apenas ajustei para comportar o cache local
+# ===============================
+# Funções originais mantidas (apenas adaptadas para usar o cache local)
+# ===============================
+
 function Run-ScriptElevated($scriptPath) {
     if (-not (Test-Path $scriptPath)) {
         [System.Windows.MessageBox]::Show("Arquivo não encontrado: $scriptPath", "Erro", "OK", "Error")
@@ -169,30 +178,25 @@ function Run-ScriptElevated($scriptPath) {
     Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
 }
 
-# Substitui Get-InfoText para ler do GitHub (raw) primeiro, senão usar local
 function Get-InfoText($scriptPath) {
-    # scriptPath: ex. C:\Geset\Contas de Usuario\Alterar Senha Administrador\Administrador.ps1
+    # tenta ler o .txt diretamente do GitHub raw (sem baixar)
     try {
         $rel = $scriptPath.Substring($LocalCache.Length).TrimStart('\','/')
         if ($rel) {
             $txtRel = [System.IO.Path]::ChangeExtension($rel, ".txt")
-            # escapar segmentos
-            $segments = $txtRel -split '/'
-            $escapedSegments = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
-            $rawUrl = "$GitHubRawBase/$($escapedSegments -join '/')"
-            try {
-                $content = Invoke-RestMethod -Uri $rawUrl -Headers $Global:GitHubHeaders -ErrorAction Stop
-                if ($content) { return $content.ToString() }
-            } catch {
-                # fallback para local
-            }
+            $segments = $txtRel -split '[\\/]'  # segmenta em ambos tipos caso
+            $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
+            $rawUrl = "$GitHubRawBase/$($escaped -join '/')"
+            $content = Invoke-RestMethod -Uri $rawUrl -Headers $Global:GitHubHeaders -ErrorAction Stop
+            if ($null -ne $content) { return $content.ToString() }
         }
-    } catch { }
+    } catch {
+        # fallback para local
+    }
 
-    # fallback: procura arquivo TXT local
     $txtFile = [System.IO.Path]::ChangeExtension($scriptPath, ".txt")
-    if (Test-Path $txtFile) { return (Get-Content $txtFile -Raw) }
-    else { return "Nenhuma documentação encontrada para este script." }
+    if (Test-Path $txtFile) { Get-Content $txtFile -Raw }
+    else { "Nenhuma documentação encontrada para este script." }
 }
 
 function Show-InfoWindow($title, $content) {
@@ -231,7 +235,7 @@ function Add-HoverShadow($button) {
 }
 
 # ===============================
-# Janela principal
+# Janela principal (idêntica ao original)
 # ===============================
 $window = New-Object System.Windows.Window
 $window.Title = "GESET Launcher"
@@ -391,13 +395,30 @@ $shadowEffect.Color = [System.Windows.Media.Colors]::LightBlue
 # ===============================
 $ScriptCheckBoxes = @{}
 
-
 function Load-Tabs {
     $tabControl.Items.Clear()
     $ScriptCheckBoxes.Clear()
 
-    # Sincroniza silenciosamente com o GitHub e obtém a lista de scripts locais
+    # Primeiro sincroniza silenciosamente (substitui automaticamente os arquivos se necessário)
     $localScripts = Sync-GitHubToLocal
+
+    # Se a sincronização não retornou nada, tenta listar a partir do cache local (segurança)
+    if (-not $localScripts -or $localScripts.Count -eq 0) {
+        # monta lista local a partir de C:\Geset
+        try {
+            $cats = Get-ChildItem -Path $LocalCache -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @("Logs") }
+            $localScripts = @()
+            foreach ($c in $cats) {
+                $subs = Get-ChildItem -Path $c.FullName -Directory -ErrorAction SilentlyContinue
+                foreach ($s in $subs) {
+                    $ps = Get-ChildItem -Path $s.FullName -Filter *.ps1 -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($ps) {
+                        $localScripts += @{ Category = $c.Name; Sub = $s.Name; LocalScript = $ps.FullName }
+                    }
+                }
+            }
+        } catch {}
+    }
 
     # Agrupa por categoria para montar as abas (mantendo comportamento original)
     $grouped = $localScripts | Group-Object -Property Category
@@ -573,11 +594,18 @@ $BtnExec.Add_Click({
     [System.Windows.MessageBox]::Show("Execução concluída.", "GESET Launcher", "OK", "Information")
 })
 
-$BtnRefresh.Add_Click({ Load-Tabs })
+# Atualizar: sincroniza e recarrega
+$BtnRefresh.Add_Click({
+    # sincroniza silenciosamente
+    Sync-GitHubToLocal | Out-Null
+    Load-Tabs
+})
 $BtnExit.Add_Click({ $window.Close() })
 
 # ===============================
 # Inicialização
 # ===============================
+# Faz sincronização inicial silenciosa e carrega as abas
+Sync-GitHubToLocal | Out-Null
 Load-Tabs
 $window.ShowDialog() | Out-Null
