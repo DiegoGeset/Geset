@@ -1,13 +1,12 @@
-# ======================================================
-# GESET Launcher - Interface WPF (Tema Escuro + Elevação)
-# Sincronização automática com GitHub (download apenas .ps1 e .exe)
-# Local cache: C:\Geset
-# Repo: https://github.com/DiegoGeset/Geset (branch main)
-# ======================================================
+# ===============================
+# GESET Launcher - Interface WPF (Tema Escuro + Ocultação e Elevação)
+# + Execução sob-demanda via GitHub API
+# - Baixa .ps1 somente ao clicar no botão
+# - Mantém estrutura original e comportamento (nova janela para execução)
+# - Log em C:\Geset\logs\Launcher.log
+# ===============================
 
-# -------------------------
-# Oculta a janela do PowerShell
-# -------------------------
+# --- Oculta a janela do PowerShell ---
 $signature = @"
 [DllImport("kernel32.dll")]
 public static extern IntPtr GetConsoleWindow();
@@ -19,9 +18,7 @@ $consolePtr = [PInvoke.Win32]::GetConsoleWindow()
 # 0 = Esconde, 5 = Mostra
 [PInvoke.Win32]::ShowWindow($consolePtr, 0)
 
-# -------------------------
-# Força execução como Administrador (mantido do original)
-# -------------------------
+# --- Verifica se está em modo Administrador ---
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Add-Type -AssemblyName PresentationFramework
@@ -34,31 +31,69 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     exit
 }
 
-# -------------------------
-# Dependências WPF
-# -------------------------
+# ===============================
+# Dependências principais
+# ===============================
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
-# Caminho do launcher (mantém para logo e compatibilidade)
-$BasePath = Split-Path -Parent $MyInvocation.MyCommand.Definition
-
-# -------------------------
-# Configuração GitHub / Cache local
-# -------------------------
+# ===============================
+# Configurações (cache local, GitHub)
+# ===============================
 $LocalCache = "C:\Geset"
+$LogPath = Join-Path $LocalCache "logs"
+$LogFile = Join-Path $LogPath "Launcher.log"
 $GitHubContentsBase = "https://api.github.com/repos/DiegoGeset/Geset/contents"
 $GitHubRawBase = "https://raw.githubusercontent.com/DiegoGeset/Geset/main"
-# Header obrigatório do GitHub
 $Global:GitHubHeaders = @{ 'User-Agent' = 'GESET-Launcher' }
 
-# Garante a criação da pasta base
+# Garante diretórios locais
 if (-not (Test-Path $LocalCache)) { New-Item -Path $LocalCache -ItemType Directory -Force | Out-Null }
+if (-not (Test-Path $LogPath))   { New-Item -Path $LogPath -ItemType Directory -Force | Out-Null }
 
-# -------------------------
-# Funções utilitárias de sincronização
-# -------------------------
+# Função de log simples (append)
+function Write-Log {
+    param([string]$Message)
+    try {
+        $time = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        $line = "$time`t$Message"
+        Add-Content -Path $LogFile -Value $line -Encoding UTF8
+    } catch {
+        # não quebrar UI se log falhar
+    }
+}
 
-# Calcula git-blob SHA1 local (compatível com a API do GitHub)
+Write-Log "Launcher iniciado."
+
+# ===============================
+# Funções de suporte GitHub / download
+# ===============================
+
+# Escapa cada segmento de caminho (para lidar com espaços / acentos)
+function Build-GitHubApiUrl {
+    param([string]$RelativePath)
+    if ([string]::IsNullOrEmpty($RelativePath)) {
+        return $GitHubContentsBase
+    } else {
+        $segments = $RelativePath -split '/'
+        $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
+        return "$GitHubContentsBase/" + ($escaped -join '/')
+    }
+}
+
+# Chama a API /contents e retorna JSON ou $null
+function Get-GitHubContents {
+    param([string]$RelativePath)
+    try {
+        $url = Build-GitHubApiUrl -RelativePath $RelativePath
+        return Invoke-RestMethod -Uri $url -Headers $Global:GitHubHeaders -ErrorAction Stop
+    } catch {
+        # registro debug opcional no log
+        Write-Log "Get-GitHubContents falhou para '$RelativePath': $($_.Exception.Message)"
+        return $null
+    }
+}
+
+# Calcula git-blob SHA1 de arquivo local (compatível com API sha)
 function Get-LocalGitBlobSha1 {
     param([string]$FilePath)
     if (-not (Test-Path $FilePath)) { return $null }
@@ -78,7 +113,7 @@ function Get-LocalGitBlobSha1 {
     }
 }
 
-# Faz download silencioso de download_url para LocalPath se necessário (compara SHA quando informado)
+# Faz download silencioso se necessário: compara SHA se fornecido; salva em LocalPath
 function Download-FromUrlIfNeeded {
     param(
         [string]$DownloadUrl,
@@ -103,61 +138,52 @@ function Download-FromUrlIfNeeded {
     if ($needDownload) {
         try {
             Invoke-WebRequest -Uri $DownloadUrl -OutFile $LocalPath -Headers $Global:GitHubHeaders -UseBasicParsing -ErrorAction Stop
+            Write-Log "Baixado: $LocalPath"
         } catch {
-            # Silencioso: não interromper a UI
-            Write-Host "Falha ao baixar $DownloadUrl" -ForegroundColor Yellow
+            Write-Log "Falha ao baixar $DownloadUrl -> $LocalPath : $($_.Exception.Message)"
         }
+    } else {
+        Write-Log "Arquivo já está atualizado: $LocalPath"
     }
+
     return $LocalPath
 }
 
-# Chama a API /contents para um caminho relativo (escape para segmentos com espaços/acento)
-function Get-GitHubContents {
-    param([string]$RelativePath)
+# ===============================
+# Função para ler descrição (.txt) do GitHub raw (sem baixar)
+# ===============================
+function Get-InfoTextFromGitHub {
+    param([string]$Category, [string]$Sub, [string]$ScriptFileName)
     try {
-        if ([string]::IsNullOrEmpty($RelativePath)) {
-            $url = $GitHubContentsBase
-        } else {
-            $segments = $RelativePath -split '/'
-            $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
-            $url = "$GitHubContentsBase/" + ($escaped -join '/')
-        }
-        return Invoke-RestMethod -Uri $url -Headers $Global:GitHubHeaders -ErrorAction Stop
+        $txtRel = "$Category/$Sub/$([System.IO.Path]::ChangeExtension($ScriptFileName, '.txt'))"
+        $segments = $txtRel -split '/'
+        $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
+        $rawUrl = "$GitHubRawBase/$($escaped -join '/')"
+        $content = Invoke-RestMethod -Uri $rawUrl -Headers $Global:GitHubHeaders -ErrorAction Stop
+        if ($null -ne $content) { return $content.ToString() }
     } catch {
-        return $null
+        # fallback será tentar local
+        Write-Log "Get-InfoTextFromGitHub falhou para $Category/$Sub/$ScriptFileName"
     }
+    return $null
 }
 
-# Sincroniza todo o repositório (categories -> subfolders -> arquivos) com C:\Geset
-# Regras:
-# - Baixa apenas .ps1 e .exe (download_url + sha)
-# - Substitui automaticamente quando SHA remoto difere (ou arquivo não existe)
-# - Remove arquivos locais que não existem mais no repo (sincronização limpa)
-function Sync-GitHubToLocal {
-    $allRemoteRelativeFiles = @()  # lista de arquivos remotos relativos (Category/Sub/File.ext)
-    $allLocalScripts = @()
+# ===============================
+# Função: Montar lista de scripts (sem baixar) a partir da API
+# Retorna objeto = @{ Category=..., Sub=..., ScriptName=..., DownloadUrl=..., Sha=... }
+# ===============================
+function Get-RemoteScriptsList {
+    $result = @()
 
-    # 1) obter diretórios raiz do repo (categorias)
     $root = Get-GitHubContents -RelativePath ""
     if (-not $root) {
-        # falha na API: tenta fallback (mantém cache local)
-        try {
-            $cats = Get-ChildItem -Path $LocalCache -Directory -ErrorAction SilentlyContinue
-            foreach ($c in $cats) {
-                $subs = Get-ChildItem -Path $c.FullName -Directory -ErrorAction SilentlyContinue
-                foreach ($s in $subs) {
-                    $ps = Get-ChildItem -Path $s.FullName -Filter *.ps1 -File -ErrorAction SilentlyContinue | Select-Object -First 1
-                    if ($ps) { $allLocalScripts += @{ Category = $c.Name; Sub = $s.Name; LocalScript = $ps.FullName } }
-                }
-            }
-        } catch {}
-        return $allLocalScripts
+        Write-Log "API root vazia ou inacessível. Usando cache local."
+        return $result
     }
 
     $categories = $root | Where-Object { $_.type -eq "dir" } | ForEach-Object { $_.name }
 
     foreach ($category in $categories) {
-        # 2) obter subpastas
         $catJson = Get-GitHubContents -RelativePath $category
         if (-not $catJson) { continue }
         $subfolders = $catJson | Where-Object { $_.type -eq "dir" } | ForEach-Object { $_.name }
@@ -165,91 +191,74 @@ function Sync-GitHubToLocal {
         foreach ($sub in $subfolders) {
             $subRel = "$category/$sub"
             $subJson = Get-GitHubContents -RelativePath $subRel
-            if (-not $subJson) {
-                # garante pasta local mesmo sem arquivos
-                $ensureLocalDir = Join-Path $LocalCache ($category + "\" + $sub)
-                if (-not (Test-Path $ensureLocalDir)) { New-Item -Path $ensureLocalDir -ItemType Directory -Force | Out-Null }
-                continue
+            if (-not $subJson) { continue }
+
+            # procura por arquivos .ps1 primeiro (todos), se não houver, aceita .exe
+            $psFiles = $subJson | Where-Object { $_.type -eq "file" -and $_.name -match '\.ps1$' }
+            $exeFiles = $subJson | Where-Object { $_.type -eq "file" -and $_.name -match '\.exe$' }
+
+            $chosen = @()
+            if ($psFiles.Count -gt 0) {
+                $chosen = $psFiles
+            } elseif ($exeFiles.Count -gt 0) {
+                $chosen = $exeFiles
             }
 
-            # 3) procura por arquivos: prefer .ps1 primeiro, senão .exe
-            # Pegamos todos os arquivos .ps1/.exe (não apenas o primeiro) para garantir downloads
-            $filesToDownload = $subJson | Where-Object { $_.type -eq "file" -and ($_.name -match '\.ps1$' -or $_.name -match '\.exe$') }
-
-            # garante a pasta local
-            $localDir = Join-Path $LocalCache ($category + "\" + $sub)
-            if (-not (Test-Path $localDir)) { New-Item -Path $localDir -ItemType Directory -Force | Out-Null }
-
-            foreach ($fileItem in $filesToDownload) {
-                $relPath = "$category/$sub/$($fileItem.name)"
-                $allRemoteRelativeFiles += $relPath
-
-                # download_url e sha fornecidos pela API 'contents'
-                $downloadUrl = $fileItem.download_url
-                $remoteSha = $fileItem.sha
-
-                # local target path
-                $localFile = Join-Path $localDir $fileItem.name
-
-                # efetua download/substituição silenciosa
-                Download-FromUrlIfNeeded -DownloadUrl $downloadUrl -LocalPath $localFile -ExpectedSha $remoteSha
-
-                # registra para a UI (apenas o primeiro script por subpasta será mostrado na UI, igual ao comportamento original)
-                # Observação: para manter o comportamento original, vamos selecionar o primeiro .ps1 (se houver),
-                # mas continuamos baixando todos os .ps1/.exe.
-                if ($fileItem.name -match '\.ps1$') {
-                    # só adiciona uma vez por sub (se já tiver um, não adiciona novamente)
-                    if (-not ($allLocalScripts | Where-Object { $_.Category -eq $category -and $_.Sub -eq $sub })) {
-                        $allLocalScripts += @{ Category = $category; Sub = $sub; LocalScript = $localFile }
-                    }
-                } elseif ($fileItem.name -match '\.exe$') {
-                    if (-not ($allLocalScripts | Where-Object { $_.Category -eq $category -and $_.Sub -eq $sub })) {
-                        $allLocalScripts += @{ Category = $category; Sub = $sub; LocalScript = $localFile }
-                    }
+            foreach ($fileItem in $chosen) {
+                $obj = [PSCustomObject]@{
+                    Category    = $category
+                    Sub         = $sub
+                    ScriptName  = $fileItem.name
+                    DownloadUrl = $fileItem.download_url
+                    Sha         = $fileItem.sha
                 }
+                $result += $obj
             }
-
-            # se não havia .ps1 nem .exe, garantia: já criamos a pasta local, não adicionamos script
         }
     }
 
-    # 4) limpeza: remover arquivos locais que não existem mais no repositório remoto
-    try {
-        # cria lista de caminhos locais esperados a partir de $allRemoteRelativeFiles
-        $expectedLocalFiles = $allRemoteRelativeFiles | ForEach-Object {
-            $p = $_ -replace '/','\'   # transforma para caminho windows relativo
-            Join-Path $LocalCache $p
-        } | Sort-Object -Unique
-
-        # enumerar arquivos locais sob C:\Geset (apenas .ps1/.exe)
-        $localFiles = Get-ChildItem -Path $LocalCache -Recurse -File -Include *.ps1,*.exe -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-
-        foreach ($lf in $localFiles) {
-            if ($expectedLocalFiles -notcontains $lf) {
-                # remover arquivo local que não existe mais no repo
-                try { Remove-Item -Path $lf -Force -ErrorAction SilentlyContinue } catch {}
-            }
-        }
-
-        # remover diretórios vazios recursivamente
-        $dirs = Get-ChildItem -Path $LocalCache -Directory -Recurse -ErrorAction SilentlyContinue | Sort-Object -Property FullName -Descending
-        foreach ($d in $dirs) {
-            $files = Get-ChildItem -Path $d.FullName -File -ErrorAction SilentlyContinue
-            $subdirs = Get-ChildItem -Path $d.FullName -Directory -ErrorAction SilentlyContinue
-            if ((-not $files) -and (-not $subdirs)) {
-                try { Remove-Item -Path $d.FullName -Force -Recurse -ErrorAction SilentlyContinue } catch {}
-            }
-        }
-    } catch {
-        # silencioso
-    }
-
-    return $allLocalScripts
+    return $result
 }
 
-# -------------------------
-# Funções originais (mantidas)
-# -------------------------
+# ===============================
+# Função: Quando clicar no botão — baixar (se necessário) e executar em nova janela
+# Recebe objeto Tag com propriedades: Category, Sub, ScriptName, DownloadUrl, Sha
+# ===============================
+function On-ScriptButtonClick {
+    param([object]$tagObj)
+
+    try {
+        $category = $tagObj.Category
+        $sub = $tagObj.Sub
+        $scriptName = $tagObj.ScriptName
+        $downloadUrl = $tagObj.DownloadUrl
+        $remoteSha = $tagObj.Sha
+
+        $localDir = Join-Path $LocalCache ($category + "\" + $sub)
+        if (-not (Test-Path $localDir)) { New-Item -Path $localDir -ItemType Directory -Force | Out-Null; Write-Log "Criada pasta: $localDir" }
+
+        $localScript = Join-Path $localDir $scriptName
+
+        # Download/substituição silenciosa se necessário
+        Download-FromUrlIfNeeded -DownloadUrl $downloadUrl -LocalPath $localScript -ExpectedSha $remoteSha
+
+        # Executa em nova janela do PowerShell com elevação (como comportamento original)
+        try {
+            Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$localScript`"" -Verb RunAs
+            Write-Log "Executado: $localScript"
+        } catch {
+            Write-Log "Falha ao executar $localScript : $($_.Exception.Message)"
+            [System.Windows.MessageBox]::Show("Falha ao executar o script: $scriptName", "Erro", "OK", "Error")
+        }
+
+    } catch {
+        Write-Log "On-ScriptButtonClick falhou: $($_.Exception.Message)"
+    }
+}
+
+# ===============================
+# Funções de UI originais (mantidas)
+# ===============================
 function Run-ScriptElevated($scriptPath) {
     if (-not (Test-Path $scriptPath)) {
         [System.Windows.MessageBox]::Show("Arquivo não encontrado: $scriptPath", "Erro", "OK", "Error")
@@ -259,7 +268,7 @@ function Run-ScriptElevated($scriptPath) {
 }
 
 function Get-InfoText($scriptPath) {
-    # tenta ler .txt do GitHub raw (sem baixar); se falhar, usa local
+    # Tenta extrair Category/Sub/script a partir do localPath para solicitar raw .txt
     try {
         if ($scriptPath -and ($scriptPath.StartsWith($LocalCache))) {
             $rel = $scriptPath.Substring($LocalCache.Length).TrimStart('\','/')
@@ -267,12 +276,14 @@ function Get-InfoText($scriptPath) {
             $segments = $txtRel -split '[\\/]'
             $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
             $rawUrl = "$GitHubRawBase/$($escaped -join '/')"
-            $content = Invoke-RestMethod -Uri $rawUrl -Headers $Global:GitHubHeaders -ErrorAction Stop
-            if ($null -ne $content) { return $content.ToString() }
+            try {
+                $content = Invoke-RestMethod -Uri $rawUrl -Headers $Global:GitHubHeaders -ErrorAction Stop
+                if ($null -ne $content) { return $content.ToString() }
+            } catch {
+                # fallback local
+            }
         }
-    } catch {
-        # fallback para local
-    }
+    } catch {}
 
     $txtFile = [System.IO.Path]::ChangeExtension($scriptPath, ".txt")
     if (Test-Path $txtFile) { Get-Content $txtFile -Raw }
@@ -314,9 +325,9 @@ function Add-HoverShadow($button) {
     $button.Add_MouseLeave({ $this.Effect = $null })
 }
 
-# -------------------------
-# UI (mantida exatamente do original)
-# -------------------------
+# ===============================
+# Janela principal (mantida idêntica ao original)
+# ===============================
 $window = New-Object System.Windows.Window
 $window.Title = "GESET Launcher"
 $window.Width = 780
@@ -334,7 +345,9 @@ $mainGrid.RowDefinitions[1].Height = "*"
 $mainGrid.RowDefinitions[2].Height = "60"
 $window.Content = $mainGrid
 
+# ===============================
 # Cabeçalho
+# ===============================
 $topPanel = New-Object System.Windows.Controls.StackPanel
 $topPanel.Orientation = "Horizontal"
 $topPanel.HorizontalAlignment = "Center"
@@ -368,7 +381,9 @@ $topPanel.Children.Add($titleText)
 [System.Windows.Controls.Grid]::SetRow($topPanel, 0)
 $mainGrid.Children.Add($topPanel)
 
-# Tabs
+# ===============================
+# Tabs - Categorias
+# ===============================
 $tabControl = New-Object System.Windows.Controls.TabControl
 $tabControl.Margin = "15,0,15,0"
 
@@ -422,7 +437,9 @@ $tabControl.Resources = [Windows.Markup.XamlReader]::Load($tabReader)
 [System.Windows.Controls.Grid]::SetRow($tabControl, 1)
 $mainGrid.Children.Add($tabControl)
 
+# ===============================
 # Estilo arredondado dos botões
+# ===============================
 $roundedStyle = @"
 <Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Button'>
     <Setter Property='Background' Value='#2E5D9F'/>
@@ -456,27 +473,56 @@ $roundedStyle = @"
 $styleReader = (New-Object System.Xml.XmlNodeReader ([xml]$roundedStyle))
 $roundedButtonStyle = [Windows.Markup.XamlReader]::Load($styleReader)
 
+# ===============================
 # Tema escuro padrão
+# ===============================
 $window.Background = "#0A1A33"
 $tabControl.Background = "#102A4D"
 $titleText.Foreground = "#FFFFFF"
 $shadowEffect.Color = [System.Windows.Media.Colors]::LightBlue
 
-# -------------------------
-# Carregamento das abas (a partir de C:\Geset sincronizado)
-# -------------------------
+# ===============================
+# Função para carregar categorias e scripts (API-driven, sem baixar)
+# ===============================
 $ScriptCheckBoxes = @{}
 
 function Load-Tabs {
     $tabControl.Items.Clear()
     $ScriptCheckBoxes.Clear()
 
-    # Lista categorias locais (criada pela sincronização)
-    $categories = Get-ChildItem -Path $LocalCache -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @("Logs") }
+    # Obtem lista remota (estrutura)
+    $remoteList = Get-RemoteScriptsList
 
-    foreach ($category in $categories) {
+    # Se remoto estiver vazio (API falhou), tenta montar a partir do cache local
+    if (-not $remoteList -or $remoteList.Count -eq 0) {
+        Write-Log "Remote list vazia — gerando a partir de C:\Geset"
+        $remoteList = @()
+        $cats = Get-ChildItem -Path $LocalCache -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @("logs","Logs") }
+        foreach ($c in $cats) {
+            $subs = Get-ChildItem -Path $c.FullName -Directory -ErrorAction SilentlyContinue
+            foreach ($s in $subs) {
+                $ps = Get-ChildItem -Path $s.FullName -Filter *.ps1 -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($ps) {
+                    $obj = [PSCustomObject]@{
+                        Category    = $c.Name
+                        Sub         = $s.Name
+                        ScriptName  = $ps.Name
+                        DownloadUrl = "$GitHubRawBase/$([System.Uri]::EscapeDataString($c.Name))/ $([System.Uri]::EscapeDataString($s.Name))/ $([System.Uri]::EscapeDataString($ps.Name))".Trim()
+                        Sha         = Get-LocalGitBlobSha1 -FilePath $ps.FullName
+                    }
+                    $remoteList += $obj
+                }
+            }
+        }
+    }
+
+    # Agrupar por categoria
+    $grouped = $remoteList | Group-Object -Property Category
+
+    foreach ($grp in $grouped) {
+        $category = $grp.Name
         $tab = New-Object System.Windows.Controls.TabItem
-        $tab.Header = $category.Name
+        $tab.Header = $category
 
         $border = New-Object System.Windows.Controls.Border
         $border.BorderThickness = "1"
@@ -498,10 +544,23 @@ function Load-Tabs {
         $scrollViewer.Content = $panel
         $border.Child = $scrollViewer
 
-        $subfolders = Get-ChildItem -Path $category.FullName -Directory -ErrorAction SilentlyContinue
-        foreach ($sub in $subfolders) {
-            $scriptFile = Get-ChildItem -Path $sub.FullName -Filter *.ps1 -File -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($scriptFile) {
+        foreach ($entry in $grp.Group) {
+            $sub = $entry.Sub
+            $scriptName = $entry.ScriptName
+            $downloadUrl = $entry.DownloadUrl
+            $sha = $entry.Sha
+
+            # Tag object to keep metadata for on-click
+            $tagObj = [PSCustomObject]@{
+                Category    = $category
+                Sub         = $sub
+                ScriptName  = $scriptName
+                DownloadUrl = $downloadUrl
+                Sha         = $sha
+            }
+
+            # Build UI only if scriptName exists
+            if ($scriptName) {
                 $sp = New-Object System.Windows.Controls.StackPanel
                 $sp.Orientation = "Horizontal"
                 $sp.Margin = "0,0,0,8"
@@ -518,16 +577,19 @@ function Load-Tabs {
                 $chk = New-Object System.Windows.Controls.CheckBox
                 $chk.VerticalAlignment = "Center"
                 $chk.Margin = "0,0,8,0"
-                $chk.Tag = $scriptFile.FullName
-                $ScriptCheckBoxes[$scriptFile.FullName] = $chk
+                # Tag only local path not known yet; store later if downloaded. For multi-select execution, we'll use ScriptCheckBoxes keys as local path placeholder = remote path string
+                $remotePlaceholder = "$($category)/$($sub)/$($scriptName)"
+                $chk.Tag = $remotePlaceholder
+                $ScriptCheckBoxes[$remotePlaceholder] = $chk
                 [System.Windows.Controls.Grid]::SetColumn($chk, 0)
 
                 $btn = New-Object System.Windows.Controls.Button
-                $btn.Content = $sub.Name
+                $btn.Content = $sub
                 $btn.Width = 200
                 $btn.Height = 32
                 $btn.Style = $roundedButtonStyle
-                $btn.Tag = $scriptFile.FullName
+                # store tag metadata object
+                $btn.Tag = $tagObj
                 $btn.VerticalAlignment = "Center"
                 Add-HoverShadow $btn
                 [System.Windows.Controls.Grid]::SetColumn($btn, 1)
@@ -539,7 +601,7 @@ function Load-Tabs {
                 $infoBtn.Margin = "8,0,0,0"
                 $infoBtn.Style = $roundedButtonStyle
                 $infoBtn.Background = "#1E90FF"
-                $infoBtn.Tag = $scriptFile.FullName
+                $infoBtn.Tag = $tagObj
                 $infoBtn.VerticalAlignment = "Center"
                 Add-HoverShadow $infoBtn
                 [System.Windows.Controls.Grid]::SetColumn($infoBtn, 2)
@@ -550,10 +612,28 @@ function Load-Tabs {
                 $sp.Children.Add($innerGrid)
                 $panel.Children.Add($sp)
 
-                $btn.Add_Click({ Run-ScriptElevated $this.Tag })
+                # Click: baixar se necessário e executar
+                $btn.Add_Click({
+                    $t = $this.Tag
+                    On-ScriptButtonClick -tagObj $t
+                })
+
+                # Info click: tenta buscar .txt do raw, se não, tenta local
                 $infoBtn.Add_Click({
-                    $infoText = Get-InfoText $this.Tag
-                    Show-InfoWindow -title $sub.Name -content $infoText
+                    $t = $this.Tag
+                    # tenta obter info do raw (sem download)
+                    $info = $null
+                    try {
+                        $info = Get-InfoTextFromGitHub -Category $t.Category -Sub $t.Sub -ScriptFileName $t.ScriptName
+                    } catch {}
+                    if (-not $info) {
+                        # se o arquivo local existir, use-o
+                        $localCandidate = Join-Path $LocalCache ($t.Category + "\" + $t.Sub + "\" + $t.ScriptName)
+                        $txtLocal = [System.IO.Path]::ChangeExtension($localCandidate, ".txt")
+                        if (Test-Path $txtLocal) { $info = Get-Content $txtLocal -Raw }
+                    }
+                    if (-not $info) { $info = "Nenhuma documentação encontrada para este script." }
+                    Show-InfoWindow -title $t.Sub -content $info
                 })
             }
         }
@@ -563,9 +643,9 @@ function Load-Tabs {
     }
 }
 
-# -------------------------
+# ===============================
 # Rodapé (idêntico ao original)
-# -------------------------
+# ===============================
 $footerGrid = New-Object System.Windows.Controls.Grid
 $footerGrid.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
 $footerGrid.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
@@ -607,7 +687,7 @@ $footerPanel.Children.Add($BtnExit)
 [System.Windows.Controls.Grid]::SetColumn($footerPanel, 0)
 $footerGrid.Children.Add($footerPanel)
 
-# Informações do sistema
+# --- Informações do sistema ---
 $infoText = New-Object System.Windows.Controls.TextBlock
 $infoText.HorizontalAlignment = "Right"
 $infoText.VerticalAlignment = "Center"
@@ -627,35 +707,68 @@ $timer.Start()
 [System.Windows.Controls.Grid]::SetRow($footerGrid, 2)
 $mainGrid.Children.Add($footerGrid)
 
-# -------------------------
+# ===============================
 # Ações dos botões
-# -------------------------
+# ===============================
 $BtnExec.Add_Click({
-    $selected = $ScriptCheckBoxes.GetEnumerator() | Where-Object { $_.Value.IsChecked -eq $true } | ForEach-Object { $_.Key }
-    if ($selected.Count -eq 0) {
+    # Executa todos os scripts marcados (multi-select)
+    $selectedKeys = $ScriptCheckBoxes.GetEnumerator() | Where-Object { $_.Value.IsChecked -eq $true } | ForEach-Object { $_.Key }
+    if ($selectedKeys.Count -eq 0) {
         [System.Windows.MessageBox]::Show("Nenhum script selecionado.", "Aviso", "OK", "Warning") | Out-Null
         return
     }
-    foreach ($script in $selected) {
-        Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$script`"" -Verb RunAs -Wait
+
+    foreach ($key in $selectedKeys) {
+        # key = "Category/Sub/ScriptName"
+        $parts = $key -split '/'
+        if ($parts.Count -lt 3) { continue }
+        $category = $parts[0]
+        $sub = $parts[1]
+        $scriptName = $parts[2]
+        # Consultar API para obter download_url e sha (sempre atual)
+        $subJson = Get-GitHubContents -RelativePath "$category/$sub"
+        if ($subJson) {
+            $fileItem = $subJson | Where-Object { $_.type -eq "file" -and $_.name -eq $scriptName } | Select-Object -First 1
+            if ($fileItem) {
+                $tagObj = [PSCustomObject]@{
+                    Category = $category
+                    Sub = $sub
+                    ScriptName = $fileItem.name
+                    DownloadUrl = $fileItem.download_url
+                    Sha = $fileItem.sha
+                }
+                On-ScriptButtonClick -tagObj $tagObj
+            } else {
+                Write-Log "Arquivo selecionado não encontrado no remote: $key"
+            }
+        } else {
+            # fallback: tentar executar arquivo local (se existir)
+            $localCandidate = Join-Path $LocalCache ($category + "\" + $sub + "\" + $scriptName)
+            if (Test-Path $localCandidate) {
+                Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$localCandidate`"" -Verb RunAs
+                Write-Log "Executado (fallback local): $localCandidate"
+            } else {
+                Write-Log "Não foi possível localizar $key no remote nem local."
+            }
+        }
     }
+
     [System.Windows.MessageBox]::Show("Execução concluída.", "GESET Launcher", "OK", "Information")
 })
 
-# Atualizar: sincroniza e recarrega (silencioso)
+# Botão Atualizar: reconsulta a API e recarrega abas
 $BtnRefresh.Add_Click({
-    Sync-GitHubToLocal | Out-Null
+    Write-Log "Atualização solicitada pelo usuário."
     Load-Tabs
 })
 
 $BtnExit.Add_Click({ $window.Close() })
 
-# -------------------------
+# ===============================
 # Inicialização
-# -------------------------
-# Faz sincronização inicial (substitui/atualiza local) e carrega as abas
-Sync-GitHubToLocal | Out-Null
+# ===============================
+# Carrega abas a partir da API (sem baixar scripts). Se API indisponível, usa cache local.
 Load-Tabs
 $window.ShowDialog() | Out-Null
 
-# ========================= END =========================
+Write-Log "Launcher finalizado."
