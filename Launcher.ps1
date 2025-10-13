@@ -50,7 +50,17 @@ $RepoHtmlRoot = "https://github.com/$RepoOwner/$RepoName/tree/$Branch"
 $RawRoot = "https://raw.githubusercontent.com/$RepoOwner/$RepoName/$Branch"
 
 # User-Agent para evitar problemas
-$Global:GitHubHeaders = @{ 'User-Agent' = 'GESET-Launcher' }
+# --- ADIÇÃO: Suporta autenticação via token (se existir em GITHUB_TOKEN) ---
+$GitHubToken = "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"   # defina com: setx GITHUB_TOKEN "ghp_seuTokenAqui123"
+
+$Global:GitHubHeaders = @{
+    'User-Agent' = 'GESET-Launcher'
+    'Accept'     = 'application/vnd.github.v3+json'
+}
+if ($GitHubToken) {
+    $Global:GitHubHeaders['Authorization'] = "token $GitHubToken"
+}
+# FIM DA ADIÇÃO
 
 # Garante pastas locais (cache e logs)
 if (-not (Test-Path $LocalCache)) { New-Item -Path $LocalCache -ItemType Directory -Force | Out-Null }
@@ -690,7 +700,7 @@ function Load-Tabs {
 # Rodapé (idêntico ao original)
 # ===============================
 $footerGrid = New-Object System.Windows.Controls.Grid
-$footerGrid.ColumnDefinitions.Add((New-Object System.Windows.Controls\ColumnDefinition))
+$footerGrid.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
 $footerGrid.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
 $footerGrid.Margin = "15,0,15,10"
 
