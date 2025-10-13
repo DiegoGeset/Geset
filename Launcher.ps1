@@ -133,7 +133,7 @@ function Parse-GitHubHtmlPaths {
             $url = "$RepoHtmlRoot/" + ($escaped -join '/')
         }
 
-        $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -Headers $Global:GitHubHeaders -ErrorAction Stop
+        $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -ErrorAction Stop
 
         # coletar links que contenham /tree/main/ (pastas) e /blob/main/ (arquivos)
         $links = $resp.Links | Where-Object { $_.href -and ($_.href -match "/$RepoOwner/$RepoName/(tree|blob)/$Branch/") }
