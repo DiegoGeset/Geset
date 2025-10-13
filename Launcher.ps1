@@ -51,13 +51,15 @@ $RawRoot = "https://raw.githubusercontent.com/$RepoOwner/$RepoName/$Branch"
 
 # User-Agent para evitar problemas
 # --- ADIÇÃO: Suporta autenticação via token (se existir em GITHUB_TOKEN) ---
-$GitHubToken = "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"   # defina com: setx GITHUB_TOKEN "ghp_seuTokenAqui123"
+# OPÇÃO A: Token visível/editável no início do script (você pediu)
+# Substitua o valor abaixo pelo seu token pessoal do GitHub:
+$GitHubToken = "<SEU_TOKEN_AQUI>"
 
 $Global:GitHubHeaders = @{
     'User-Agent' = 'GESET-Launcher'
     'Accept'     = 'application/vnd.github.v3+json'
 }
-if ($GitHubToken) {
+if ($GitHubToken -and $GitHubToken -ne "") {
     $Global:GitHubHeaders['Authorization'] = "token $GitHubToken"
 }
 # FIM DA ADIÇÃO
@@ -111,7 +113,8 @@ function Download-RawFile {
     try {
         $folder = Split-Path $localPath -Parent
         if (-not (Test-Path $folder)) { New-Item -Path $folder -ItemType Directory -Force | Out-Null }
-        Invoke-WebRequest -Uri $rawUrl -OutFile $localPath -UseBasicParsing -Headers $Global:GitHubHeaders -ErrorAction Stop
+        # RAW endpoint não aceita Authorization header; mas não faz mal enviar User-Agent/Accept
+        Invoke-WebRequest -Uri $rawUrl -OutFile $localPath -UseBasicParsing -Headers @{ 'User-Agent' = $Global:GitHubHeaders['User-Agent']; 'Accept' = $Global:GitHubHeaders['Accept'] } -ErrorAction Stop
         Write-Log "Baixado: $rawUrl -> $localPath"
         return $true
     } catch {
@@ -122,6 +125,7 @@ function Download-RawFile {
 
 # Parseia página HTML do GitHub e retorna links relevantes com /tree/main/ ou /blob/main/
 # Retorna coleção de strings (os caminhos relativos depois do branch)
+# Mantive a função para compatibilidade, mas não é mais utilizada pelo Get-RemoteStructure.
 function Parse-GitHubHtmlPaths {
     param([string]$relativePath)
     try {
@@ -133,6 +137,7 @@ function Parse-GitHubHtmlPaths {
             $url = "$RepoHtmlRoot/" + ($escaped -join '/')
         }
 
+        # IMPORTANTE: para HTML parsing do github.com usamos requisição ANÔNIMA (sem Authorization)
         $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -ErrorAction Stop
 
         # coletar links que contenham /tree/main/ (pastas) e /blob/main/ (arquivos)
@@ -157,58 +162,92 @@ function Parse-GitHubHtmlPaths {
     }
 }
 
-# Obtém a estrutura remota: categorias -> subpastas -> nome exato do .ps1 (se existir)
+# ===============================
+# Get-RemoteStructure (ATUALIZADA para usar a API do GitHub autenticada)
+# Mantém assinatura e formato de retorno originais:
 # Retorna array de objetos @{Category=..; Sub=..; ScriptName=..}
+# ===============================
 function Get-RemoteStructure {
     $result = @()
 
-    Write-Log "Get-RemoteStructure iniciada (HTML parsing)."
+    Write-Log "Get-RemoteStructure iniciada (API parsing)."
 
-    # 1) obter top-level links (pode conter 'Category' e também deeper paths)
-    $rootItems = Parse-GitHubHtmlPaths -relativePath ""
-    if (-not $rootItems -or $rootItems.Count -eq 0) {
-        Write-Log "Nenhuma pasta detectada na raiz via HTML."
-        return $result
-    }
+    try {
+        # 1) listar itens na raiz do repositório via API
+        $apiRoot = "https://api.github.com/repos/$RepoOwner/$RepoName/contents?ref=$Branch"
+        $rootItems = Invoke-RestMethod -Uri $apiRoot -Headers $Global:GitHubHeaders -ErrorAction Stop
 
-    # extrair categorias top-level (primeiro segmento)
-    $topCategories = $rootItems | ForEach-Object { ($_ -split '/')[0] } | Sort-Object -Unique
+        # filtra apenas diretórios top-level
+        $topDirs = $rootItems | Where-Object { $_.type -eq 'dir' }
 
-    foreach ($cat in $topCategories) {
-        # obter conteúdo da página da categoria -> pegar subpastas
-        $catHtmlItems = Parse-GitHubHtmlPaths -relativePath $cat
-
-        # subpastas: itens que são exatamente "Category/Sub..." -> extrair segundo segmento
-        $subnames = $catHtmlItems | Where-Object { $_ -match ("^" + [regex]::Escape($cat) + "/") } | ForEach-Object { ($_ -split '/')[1] } | Sort-Object -Unique
-
-        # Se não encontrou via HTML parsing, ainda podemos tentar acessar a página e buscar links diretos
-        if (-not $subnames -or $subnames.Count -eq 0) {
-            # fallback: tenta ver se existem links que começam com "Category/" and have further segments
-            $subnames = ($catHtmlItems | ForEach-Object {
-                $parts = $_ -split '/'
-                if ($parts.Length -ge 2) { return $parts[1] } else { return $null }
-            } | Where-Object { $_ -ne $null } | Sort-Object -Unique)
+        if (-not $topDirs -or $topDirs.Count -eq 0) {
+            Write-Log "Nenhuma pasta detectada na raiz via API."
+            return $result
         }
 
-        foreach ($sub in $subnames) {
-            # agora, acessar página dessa subpasta e procurar arquivos .ps1 (links /blob/main/...)
-            $subRel = "$cat/$sub"
-            $subItems = Parse-GitHubHtmlPaths -relativePath $subRel
+        foreach ($dir in $topDirs) {
+            $cat = $dir.name
 
-            # procurar arquivos que terminam com .ps1 (caso existam)
-            $ps1 = $subItems | Where-Object { $_ -match "\.ps1$" } | ForEach-Object { ($_ -split '/')[-1] } | Sort-Object -Unique
+            # obter conteúdo da categoria (lista subpastas e arquivos)
+            $apiCat = "https://api.github.com/repos/$RepoOwner/$RepoName/contents/$($dir.path)?ref=$Branch"
+            $catItems = @()
+            try {
+                $catItems = Invoke-RestMethod -Uri $apiCat -Headers $Global:GitHubHeaders -ErrorAction Stop
+            } catch {
+                Write-Log "Falha ao obter categoria $cat via API: $($_.Exception.Message)"
+                $catItems = @()
+            }
 
-            if ($ps1 -and $ps1.Count -gt 0) {
-                # Usa o primeiro .ps1 encontrado (comportamento original)
-                $scriptName = $ps1[0]
-                $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $scriptName }
-                Write-Log "Remoto: $cat / $sub -> $scriptName"
+            # subpastas: itens do tipo dir dentro da categoria
+            $subdirs = $catItems | Where-Object { $_.type -eq 'dir' } | Sort-Object -Property name
+
+            if (-not $subdirs -or $subdirs.Count -eq 0) {
+                # Caso não haja subdiretórios, mas haja arquivos .ps1 diretamente na categoria,
+                # tratamos como Sub vazio ou único.
+                $psFiles = $catItems | Where-Object { $_.type -eq 'file' -and $_.name -like "*.ps1" } | Sort-Object -Property name
+                if ($psFiles -and $psFiles.Count -gt 0) {
+                    # usamos uma sub "root" com nome do próprio category para compatibilidade
+                    $subName = $cat
+                    $scriptName = $psFiles[0].name
+                    $result += [PSCustomObject]@{ Category = $cat; Sub = $subName; ScriptName = $scriptName }
+                    Write-Log "Remoto: $cat / $subName -> $scriptName"
+                } else {
+                    # nenhuma informação - cria entrada sem script para manter estrutura
+                    $result += [PSCustomObject]@{ Category = $cat; Sub = $null; ScriptName = $null }
+                    Write-Log "Remoto (sem sub/ps1): $cat"
+                }
             } else {
-                # não tem .ps1 conhecido (mas queremos criar a pasta local para manter estrutura)
-                $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $null }
-                Write-Log "Remoto (sem ps1): $cat / $sub"
+                foreach ($subdir in $subdirs) {
+                    $sub = $subdir.name
+                    # listar conteúdo do subdir
+                    $apiSub = "https://api.github.com/repos/$RepoOwner/$RepoName/contents/$($subdir.path)?ref=$Branch"
+                    $subItems = @()
+                    try {
+                        $subItems = Invoke-RestMethod -Uri $apiSub -Headers $Global:GitHubHeaders -ErrorAction Stop
+                    } catch {
+                        Write-Log "Falha ao obter subdir $sub do cat $cat via API: $($_.Exception.Message)"
+                        $subItems = @()
+                    }
+
+                    # procurar arquivos que terminam com .ps1 (caso existam)
+                    $ps1 = $subItems | Where-Object { $_.type -eq 'file' -and ($_.name -match "\.ps1$") } | Sort-Object -Property name
+
+                    if ($ps1 -and $ps1.Count -gt 0) {
+                        # Usa o primeiro .ps1 encontrado (comportamento original)
+                        $scriptName = $ps1[0].name
+                        $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $scriptName }
+                        Write-Log "Remoto: $cat / $sub -> $scriptName"
+                    } else {
+                        # não tem .ps1 conhecido (mas queremos criar a pasta local para manter estrutura)
+                        $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $null }
+                        Write-Log "Remoto (sem ps1): $cat / $sub"
+                    }
+                }
             }
         }
+
+    } catch {
+        Write-Log "Get-RemoteStructure falhou (API): $($_.Exception.Message)"
     }
 
     return $result
@@ -328,7 +367,8 @@ function Get-InfoText($scriptPath) {
             $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
             $rawUrl = "$RawRoot/$($escaped -join '/')"
             try {
-                $content = Invoke-RestMethod -Uri $rawUrl -Headers $Global:GitHubHeaders -ErrorAction Stop
+                # RAW não precisa de Authorization; usamos apenas User-Agent/Accept
+                $content = Invoke-RestMethod -Uri $rawUrl -Headers @{ 'User-Agent' = $Global:GitHubHeaders['User-Agent']; 'Accept' = $Global:GitHubHeaders['Accept'] } -ErrorAction Stop
                 if ($null -ne $content) { return $content.ToString() }
             } catch {
                 # fallback local
@@ -677,7 +717,8 @@ function Load-Tabs {
                             # tenta raw .txt
                             $rawTxtUrl = Build-RawUrl -category $meta.Category -sub $meta.Sub -fileName ([System.IO.Path]::ChangeExtension($meta.ScriptName, ".txt"))
                             try {
-                                $content = Invoke-RestMethod -Uri $rawTxtUrl -Headers $Global:GitHubHeaders -ErrorAction Stop
+                                # Use headers for REST where applicable, RAW endpoint uses User-Agent/Accept
+                                $content = Invoke-RestMethod -Uri $rawTxtUrl -Headers @{ 'User-Agent' = $Global:GitHubHeaders['User-Agent']; 'Accept' = $Global:GitHubHeaders['Accept'] } -ErrorAction Stop
                                 if ($null -ne $content) { $infoText = $content.ToString() }
                             } catch {
                                 # fallback para local
@@ -806,7 +847,7 @@ $BtnExit.Add_Click({ $window.Close() })
 
 # ===============================
 # Inicialização
-# - obtém estrutura remota (via HTML parsing), cria pastas locais e carrega as abas
+# - obtém estrutura remota (via API), cria pastas locais e carrega as abas
 # ===============================
 try {
     $remoteList = Get-RemoteStructure
