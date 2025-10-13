@@ -1,6 +1,6 @@
 # ===============================
 # GESET Launcher - Interface WPF (Tema Escuro + Ocultação e Elevação)
-# Integrado com GitHub: cria estrutura em C:\Geset e baixa .ps1 sob demanda
+# Integrado com GitHub (RAW HTML parsing) - Mantém estrutura original
 # ===============================
 
 # --- Oculta a janela do PowerShell ---
@@ -34,7 +34,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
 # ===============================
-# Configuração: cache local e GitHub
+# Config / Paths / GitHub
 # ===============================
 # Mantém BasePath para compatibilidade com o seu código original, mas aponta para C:\Geset
 $LocalCache = "C:\Geset"
@@ -46,12 +46,13 @@ $LogFile = Join-Path $LogPath "Launcher.log"
 $RepoOwner = "DiegoGeset"
 $RepoName = "Geset"
 $Branch = "main"
-$GitHubContentsBase = "https://api.github.com/repos/$RepoOwner/$RepoName/contents"
-$GitHubRawBase = "https://raw.githubusercontent.com/$RepoOwner/$RepoName/$Branch"
+$RepoHtmlRoot = "https://github.com/$RepoOwner/$RepoName/tree/$Branch"
+$RawRoot = "https://raw.githubusercontent.com/$RepoOwner/$RepoName/$Branch"
 
+# User-Agent para evitar problemas
 $Global:GitHubHeaders = @{ 'User-Agent' = 'GESET-Launcher' }
 
-# Garante pastas locais
+# Garante pastas locais (cache e logs)
 if (-not (Test-Path $LocalCache)) { New-Item -Path $LocalCache -ItemType Directory -Force | Out-Null }
 if (-not (Test-Path $LogPath)) { New-Item -Path $LogPath -ItemType Directory -Force | Out-Null }
 
@@ -69,79 +70,34 @@ Write-Log "Launcher iniciado."
 # ===============================
 # Funções utilitárias GitHub / Download / URL encode
 # ===============================
-# Garante encoding correto de segmentos para URLs raw
+
+# Escape de segmentos (nome de pasta/arquivo)
 function Encode-Segment {
     param([string]$s)
     if ($null -eq $s) { return "" }
-    # Escape dois passos: EscapeDataString para segmentos
     return [System.Uri]::EscapeDataString($s)
 }
 
-# Constrói URL RAW com encoding
+# Monta URL RAW com segmentos corretamente codificados
 function Build-RawUrl {
-    param([string]$category, [string]$sub, [string]$fileName)
+    param(
+        [string]$category,
+        [string]$sub,
+        [string]$fileName
+    )
     $parts = @()
     if ($category) { $parts += (Encode-Segment $category) }
     if ($sub) { $parts += (Encode-Segment $sub) }
     if ($fileName) { $parts += (Encode-Segment $fileName) }
-    return "$GitHubRawBase/" + ($parts -join '/')
+    return "$RawRoot/" + ($parts -join '/')
 }
 
-# Tenta chamar API /contents para um caminho (escape segmentos)
-function Get-GitHubApiContents {
-    param([string]$relativePath)
-    try {
-        if ([string]::IsNullOrEmpty($relativePath)) {
-            $url = $GitHubContentsBase
-        } else {
-            $segments = $relativePath -split '/'
-            $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
-            $url = "$GitHubContentsBase/" + ($escaped -join '/')
-        }
-        return Invoke-RestMethod -Uri $url -Headers $Global:GitHubHeaders -ErrorAction Stop
-    } catch {
-        Write-Log "Get-GitHubApiContents falhou para '$relativePath': $($_.Exception.Message)"
-        return $null
-    }
-}
-
-# Fallback: tenta extrair subpastas usando o HTML do GitHub (quando API bloqueada)
-function Parse-GitHubHtmlTree {
-    param([string]$relativePath)
-    try {
-        if ([string]::IsNullOrEmpty($relativePath)) {
-            $url = "https://github.com/$RepoOwner/$RepoName/tree/$Branch"
-        } else {
-            $segments = $relativePath -split '/'
-            $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
-            $url = "https://github.com/$RepoOwner/$RepoName/tree/$Branch/" + ($escaped -join '/')
-        }
-        $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -ErrorAction Stop
-        # Filtra links que apontam para tree/main/<relativePath>/...
-        $links = $resp.Links | Where-Object { $_.href -and $_.href -match "/$RepoOwner/$RepoName/tree/$Branch/" }
-        $items = $links | ForEach-Object {
-            $href = $_.href
-            # pegar o segmento após /tree/main/
-            $parts = $href.Split('/') 
-            # a parte após branch começa na posição index do branch +1
-            $idx = [Array]::IndexOf($parts, $Branch)
-            if ($idx -ge 0 -and $parts.Length -gt ($idx+1)) {
-                # retorna os segmentos depois do branch
-                $remaining = $parts[($idx+1)..($parts.Length-1)] -join '/'
-                return $remaining
-            }
-            return $null
-        } | Where-Object { $_ -ne $null } | Sort-Object -Unique
-        return $items
-    } catch {
-        Write-Log "Parse-GitHubHtmlTree falhou para '$relativePath': $($_.Exception.Message)"
-        return @()
-    }
-}
-
-# Baixa um arquivo RAW para local (sempre substitui silenciosamente)
+# Faz download silencioso de uma URL RAW para o caminho local desejado (substitui)
 function Download-RawFile {
-    param([string]$rawUrl, [string]$localPath)
+    param(
+        [string]$rawUrl,
+        [string]$localPath
+    )
     try {
         $folder = Split-Path $localPath -Parent
         if (-not (Test-Path $folder)) { New-Item -Path $folder -ItemType Directory -Force | Out-Null }
@@ -154,80 +110,93 @@ function Download-RawFile {
     }
 }
 
-# ===============================
-# Função: Obter lista de categorias/subpastas/arquivo principal (.ps1) no repositório
-# Resultado: array de objetos @{Category=..; Sub=..; ScriptName=..}
-# Estratégia:
-# - Tenta API para raiz; para cada categoria (dir), lista subdirs; para cada sub, pega primeiro *.ps1
-# - Se API falhar, usa HTML fallback para descobrir subpastas e depois tenta API individual para obter arquivos
-# ===============================
+# Parseia página HTML do GitHub e retorna links relevantes com /tree/main/ ou /blob/main/
+# Retorna coleção de strings (os caminhos relativos depois do branch)
+function Parse-GitHubHtmlPaths {
+    param([string]$relativePath)
+    try {
+        if ([string]::IsNullOrEmpty($relativePath)) {
+            $url = $RepoHtmlRoot
+        } else {
+            $segments = $relativePath -split '/'
+            $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
+            $url = "$RepoHtmlRoot/" + ($escaped -join '/')
+        }
+
+        $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -Headers $Global:GitHubHeaders -ErrorAction Stop
+
+        # coletar links que contenham /tree/main/ (pastas) e /blob/main/ (arquivos)
+        $links = $resp.Links | Where-Object { $_.href -and ($_.href -match "/$RepoOwner/$RepoName/(tree|blob)/$Branch/") }
+
+        $items = $links | ForEach-Object {
+            $href = $_.href
+            # extrai tudo após /<branch>/
+            $parts = $href.Split('/')
+            $idx = [Array]::IndexOf($parts, $Branch)
+            if ($idx -ge 0 -and $parts.Length -gt ($idx+1)) {
+                $remaining = $parts[($idx+1)..($parts.Length-1)] -join '/'
+                return $remaining
+            }
+            return $null
+        } | Where-Object { $_ -ne $null } | Sort-Object -Unique
+
+        return $items
+    } catch {
+        Write-Log "Parse-GitHubHtmlPaths falhou para '$relativePath': $($_.Exception.Message)"
+        return @()
+    }
+}
+
+# Obtém a estrutura remota: categorias -> subpastas -> nome exato do .ps1 (se existir)
+# Retorna array de objetos @{Category=..; Sub=..; ScriptName=..}
 function Get-RemoteStructure {
     $result = @()
 
-    # 1) tenta API raiz
-    $root = Get-GitHubApiContents -relativePath ""
-    if ($root) {
-        $categories = $root | Where-Object { $_.type -eq 'dir' } | ForEach-Object { $_.name }
-        foreach ($cat in $categories) {
-            # obter conteudo do category
-            $catJson = Get-GitHubApiContents -relativePath $cat
-            if (-not $catJson) { continue }
-            $subdirs = $catJson | Where-Object { $_.type -eq 'dir' } | ForEach-Object { $_.name }
-            foreach ($sub in $subdirs) {
-                $subRel = "$cat/$sub"
-                $subJson = Get-GitHubApiContents -relativePath $subRel
-                if (-not $subJson) { 
-                    # criar pasta local mesmo que vazio
-                    $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $null }
-                    continue
-                }
-                # procura por ps1
-                $ps1 = $subJson | Where-Object { $_.type -eq 'file' -and $_.name -match '\.ps1$' } | Select-Object -First 1
-                if ($ps1) {
-                    $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $ps1.name }
-                } else {
-                    # se não tem ps1, adiciona null (a pasta será criada)
-                    $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $null }
-                }
-            }
-        }
+    Write-Log "Get-RemoteStructure iniciada (HTML parsing)."
+
+    # 1) obter top-level links (pode conter 'Category' e também deeper paths)
+    $rootItems = Parse-GitHubHtmlPaths -relativePath ""
+    if (-not $rootItems -or $rootItems.Count -eq 0) {
+        Write-Log "Nenhuma pasta detectada na raiz via HTML."
         return $result
     }
 
-    Write-Log "API root vazia / inacessível - usando fallback HTML."
-    # Fallback HTML: lista categorias via página tree, depois tenta API por sub para obter arquivos
-    $categoriesHtml = Parse-GitHubHtmlTree -relativePath ""
-    if (-not $categoriesHtml -or $categoriesHtml.Count -eq 0) {
-        Write-Log "Fallback HTML não encontrou categorias."
-        return $result
-    }
+    # extrair categorias top-level (primeiro segmento)
+    $topCategories = $rootItems | ForEach-Object { ($_ -split '/')[0] } | Sort-Object -Unique
 
-    # categoriesHtml terá caminhos 'Category' ou 'Category/Sub...' - precisamos extrair top-level uniques
-    $topCategories = $categoriesHtml | ForEach-Object { ($_ -split '/')[0] } | Sort-Object -Unique
     foreach ($cat in $topCategories) {
-        # tenta obter subpastas via API individual; se falhar, usa HTML
-        $catJson = Get-GitHubApiContents -relativePath $cat
-        if ($catJson) {
-            $subdirs = $catJson | Where-Object { $_.type -eq 'dir' } | ForEach-Object { $_.name }
-        } else {
-            # HTML parsing: pegar itens que iniciam com 'cat/'
-            $subsFromHtml = $categoriesHtml | Where-Object { $_ -match ("^" + [regex]::Escape($cat) + "/") } | ForEach-Object { ($_ -split '/')[1] } | Sort-Object -Unique
-            $subdirs = $subsFromHtml
+        # obter conteúdo da página da categoria -> pegar subpastas
+        $catHtmlItems = Parse-GitHubHtmlPaths -relativePath $cat
+
+        # subpastas: itens que são exatamente "Category/Sub..." -> extrair segundo segmento
+        $subnames = $catHtmlItems | Where-Object { $_ -match ("^" + [regex]::Escape($cat) + "/") } | ForEach-Object { ($_ -split '/')[1] } | Sort-Object -Unique
+
+        # Se não encontrou via HTML parsing, ainda podemos tentar acessar a página e buscar links diretos
+        if (-not $subnames -or $subnames.Count -eq 0) {
+            # fallback: tenta ver se existem links que começam com "Category/" and have further segments
+            $subnames = ($catHtmlItems | ForEach-Object {
+                $parts = $_ -split '/'
+                if ($parts.Length -ge 2) { return $parts[1] } else { return $null }
+            } | Where-Object { $_ -ne $null } | Sort-Object -Unique)
         }
 
-        foreach ($sub in $subdirs) {
+        foreach ($sub in $subnames) {
+            # agora, acessar página dessa subpasta e procurar arquivos .ps1 (links /blob/main/...)
             $subRel = "$cat/$sub"
-            $subJson = Get-GitHubApiContents -relativePath $subRel
-            if ($subJson) {
-                $ps1 = $subJson | Where-Object { $_.type -eq 'file' -and $_.name -match '\.ps1$' } | Select-Object -First 1
-                if ($ps1) {
-                    $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $ps1.name }
-                } else {
-                    $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $null }
-                }
+            $subItems = Parse-GitHubHtmlPaths -relativePath $subRel
+
+            # procurar arquivos que terminam com .ps1 (caso existam)
+            $ps1 = $subItems | Where-Object { $_ -match "\.ps1$" } | ForEach-Object { ($_ -split '/')[-1] } | Sort-Object -Unique
+
+            if ($ps1 -and $ps1.Count -gt 0) {
+                # Usa o primeiro .ps1 encontrado (comportamento original)
+                $scriptName = $ps1[0]
+                $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $scriptName }
+                Write-Log "Remoto: $cat / $sub -> $scriptName"
             } else {
-                # sem json, ainda cria a pasta
+                # não tem .ps1 conhecido (mas queremos criar a pasta local para manter estrutura)
                 $result += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $null }
+                Write-Log "Remoto (sem ps1): $cat / $sub"
             }
         }
     }
@@ -241,6 +210,16 @@ function Get-RemoteStructure {
 # ===============================
 function Ensure-LocalStructure {
     param([array]$remoteList)
+
+    # Se nenhum remoteList foi fornecido, obtenha internamente
+    if (-not $remoteList) {
+        try {
+            $remoteList = Get-RemoteStructure
+        } catch {
+            Write-Log "Ensure-LocalStructure: Get-RemoteStructure falhou: $($_.Exception.Message)"
+            $remoteList = @()
+        }
+    }
 
     foreach ($entry in $remoteList) {
         $cat = $entry.Category
@@ -264,6 +243,12 @@ function Ensure-LocalStructure {
 # ===============================
 function Ensure-ScriptLocalAndExecute {
     param([string]$Category, [string]$Sub, [string]$ScriptName)
+
+    if (-not $ScriptName) {
+        Write-Log "Ensure-ScriptLocalAndExecute chamado sem ScriptName para $Category / $Sub"
+        [System.Windows.MessageBox]::Show("Script não encontrado no repositório: $Category / $Sub", "Erro", "OK", "Error")
+        return
+    }
 
     $localDir = Join-Path $LocalCache ($Category + "\" + $Sub)
     if (-not (Test-Path $localDir)) { New-Item -Path $localDir -ItemType Directory -Force | Out-Null; Write-Log "Criada pasta forçada: $localDir" }
@@ -296,7 +281,7 @@ function Ensure-ScriptLocalAndExecute {
 }
 
 # ===============================
-# Funções utilitárias originais mantidas
+# Funções utilitárias originais mantidas (conforme seu código)
 # ===============================
 function Run-ScriptElevated($scriptPath) {
     # Antes de executar, se o arquivo for esperado dentro do cache e não existir, tenta baixar do raw automaticamente.
@@ -308,7 +293,6 @@ function Run-ScriptElevated($scriptPath) {
             $category = $parts[0]
             $sub = $parts[1]
             $scriptName = $parts[2..($parts.Count-1)] -join '\'
-            # porém scriptName pode conter subpastas se existentes - tratamos apenas a primeira três níveis conforme estrutura padrão
             Ensure-ScriptLocalAndExecute -Category $category -Sub $sub -ScriptName $scriptName
             return
         } else {
@@ -332,7 +316,7 @@ function Get-InfoText($scriptPath) {
             $txtRel = [System.IO.Path]::ChangeExtension($rel, ".txt")
             $segments = $txtRel -split '[\\/]'
             $escaped = $segments | ForEach-Object { [System.Uri]::EscapeDataString($_) }
-            $rawUrl = "$GitHubRawBase/$($escaped -join '/')"
+            $rawUrl = "$RawRoot/$($escaped -join '/')"
             try {
                 $content = Invoke-RestMethod -Uri $rawUrl -Headers $Global:GitHubHeaders -ErrorAction Stop
                 if ($null -ne $content) { return $content.ToString() }
@@ -539,8 +523,7 @@ $titleText.Foreground = "#FFFFFF"
 $shadowEffect.Color = [System.Windows.Media.Colors]::LightBlue
 
 # ===============================
-# Função para carregar categorias e scripts
-# (mantida a lógica do original, mas agora a pasta base é C:\Geset)
+# Função para carregar categorias e scripts (mantida a lógica do original, base local C:\Geset)
 # ===============================
 $ScriptCheckBoxes = @{}
 function Load-Tabs {
@@ -602,9 +585,7 @@ function Load-Tabs {
                     $expectedLocal = Join-Path $sub.FullName $entry.ScriptName
                     $scriptFile = New-Object System.IO.FileInfo($expectedLocal)
                 } else {
-                    # se remoto não informar scriptName, tentamos não adicionar botão (ou adiciona botão sem executar)
-                    # para garantir compatibilidade com seu fluxo, vamos continuar apenas se existir ps1 ou remote entry was with script name
-                    # se não existir scriptFile, pule
+                    # se remoto não informar scriptName, pule (mantendo o comportamento seguro)
                     continue
                 }
             }
@@ -709,7 +690,7 @@ function Load-Tabs {
 # Rodapé (idêntico ao original)
 # ===============================
 $footerGrid = New-Object System.Windows.Controls.Grid
-$footerGrid.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
+$footerGrid.ColumnDefinitions.Add((New-Object System.Windows.Controls\ColumnDefinition))
 $footerGrid.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
 $footerGrid.Margin = "15,0,15,10"
 
@@ -802,6 +783,12 @@ $BtnExec.Add_Click({
 
 $BtnRefresh.Add_Click({
     Write-Log "Atualização solicitada pelo usuário."
+    try {
+        $remoteList = Get-RemoteStructure
+        Ensure-LocalStructure -remoteList $remoteList
+    } catch {
+        Write-Log "Erro ao atualizar manualmente: $($_.Exception.Message)"
+    }
     Load-Tabs
 })
 
@@ -809,7 +796,7 @@ $BtnExit.Add_Click({ $window.Close() })
 
 # ===============================
 # Inicialização
-# - obtém estrutura remota (tenta API), cria pastas locais e carrega as abas
+# - obtém estrutura remota (via HTML parsing), cria pastas locais e carrega as abas
 # ===============================
 try {
     $remoteList = Get-RemoteStructure
