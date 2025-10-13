@@ -53,7 +53,7 @@ $RawRoot = "https://raw.githubusercontent.com/$RepoOwner/$RepoName/$Branch"
 # --- ADIÇÃO: Suporta autenticação via token (se existir em GITHUB_TOKEN) ---
 # OPÇÃO A: Token visível/editável no início do script (você pediu)
 # Substitua o valor abaixo pelo seu token pessoal do GitHub:
-$GitHubToken = "<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>"
+$GitHubToken = "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"
 
 $Global:GitHubHeaders = @{
     'User-Agent' = 'GESET-Launcher'
