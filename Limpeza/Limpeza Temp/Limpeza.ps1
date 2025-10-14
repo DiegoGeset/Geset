@@ -4,7 +4,7 @@
 # Autor: Geset
 # ============================================================
 
-# --- Verifica se está rodando como administrador
+# --- Verifica se está rodando como administrador ---
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "`n[⚙️] Elevando permissões para Administrador..." -ForegroundColor Yellow
@@ -12,7 +12,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     exit
 }
 
-# --- Configuração visual
+# --- Configuração visual ---
 $host.UI.RawUI.WindowTitle = "🧹 Utilitário de Limpeza do Sistema - Geset"
 Clear-Host
 Write-Host "============================================================" -ForegroundColor Cyan
@@ -20,13 +20,13 @@ Write-Host "           🧹 UTILITÁRIO DE LIMPEZA DO SISTEMA              " -Fo
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Caminho do diretório atual
+# --- Caminho do diretório atual ---
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-# --- Repositório no GitHub (RAW)
+# --- Repositório no GitHub (RAW) ---
 $baseURL = "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Limpeza/Limpeza%20Temp"
 
-# --- Lista de arquivos necessários
+# --- Lista de arquivos necessários ---
 $arquivos = @(
     "LimpezaPrefetch.exe",
     "LimpezaLixeira.exe",
@@ -34,7 +34,7 @@ $arquivos = @(
     "LimpezaChrome.exe"
 )
 
-# --- Função: Verificar conexão com a internet
+# --- Função: Verificar conexão com a internet ---
 function Test-InternetConnection {
     try {
         $req = [System.Net.WebRequest]::Create("https://github.com")
@@ -47,7 +47,7 @@ function Test-InternetConnection {
     }
 }
 
-# --- Função: Obter hash SHA256 de um arquivo
+# --- Função: Obter hash SHA256 de um arquivo ---
 function Get-FileHashValue($filePath) {
     if (Test-Path $filePath) {
         return (Get-FileHash -Algorithm SHA256 -Path $filePath).Hash
@@ -56,7 +56,7 @@ function Get-FileHashValue($filePath) {
     }
 }
 
-# --- Função: Obter hash remoto do GitHub (binário)
+# --- Função: Obter hash remoto do GitHub (binário) ---
 function Get-RemoteFileHash($url) {
     try {
         $bytes = (Invoke-WebRequest -Uri $url -UseBasicParsing).Content
@@ -71,14 +71,14 @@ function Get-RemoteFileHash($url) {
     }
 }
 
-# --- Verificação de conexão
+# --- Verificação de conexão ---
 if (-not (Test-InternetConnection)) {
     Write-Host "[⚠️] Sem conexão com a Internet. Verificação de atualização será ignorada." -ForegroundColor Yellow
 } else {
     Write-Host "[🌐] Conexão com a Internet detectada." -ForegroundColor Cyan
 }
 
-# --- Verifica e baixa/atualiza arquivos necessários
+# --- Verifica e baixa/atualiza arquivos necessários ---
 foreach ($arquivo in $arquivos) {
     $caminhoLocal = Join-Path $scriptDir $arquivo
     $urlRemota = "$baseURL/" + [System.Uri]::EscapeDataString($arquivo)
@@ -125,7 +125,7 @@ foreach ($arquivo in $arquivos) {
     Start-Sleep -Milliseconds 500
 }
 
-# --- Função auxiliar para executar ferramentas .exe
+# --- Função auxiliar para executar ferramentas .exe ---
 function Run-Tool($name, $file) {
     Write-Host "[🔹] Executando $name..." -ForegroundColor Yellow
     try {
@@ -138,7 +138,7 @@ function Run-Tool($name, $file) {
         # Garante que o arquivo esteja desbloqueado
         Unblock-File -Path $fullPath
 
-        # Executa o programa sem fechar o PowerShell
+        # Executa o programa e espera finalizar
         $process = Start-Process -FilePath $fullPath -PassThru -ErrorAction Stop
         $process.WaitForExit()
 
@@ -151,13 +151,13 @@ function Run-Tool($name, $file) {
     Start-Sleep -Seconds 1
 }
 
-# --- Execução das ferramentas
+# --- Execução das ferramentas ---
 Run-Tool "Limpeza de Prefetch" "LimpezaPrefetch.exe"
 Run-Tool "Limpeza da Lixeira" "LimpezaLixeira.exe"
 Run-Tool "Limpeza do Edge" "LimpezaEdge.exe"
 Run-Tool "Limpeza do Chrome" "LimpezaChrome.exe"
 
-# --- Conclusão
+# --- Conclusão ---
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "🎉 Todas as limpezas foram concluídas com sucesso!" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Cyan
