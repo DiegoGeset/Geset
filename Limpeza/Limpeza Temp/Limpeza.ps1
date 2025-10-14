@@ -24,7 +24,7 @@ Write-Host ""
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
 # --- Repositório no GitHub (RAW)
-$baseURL = "https://raw.githubusercontent.com/DiegoGeset/Geset/refs/heads/main/Limpeza/Limpeza%20Temp"
+$baseURL = "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Limpeza/Limpeza%20Temp"
 
 # --- Lista de arquivos necessários
 $arquivos = @(
@@ -47,7 +47,7 @@ function Test-InternetConnection {
     }
 }
 
-# --- Função: Obter hash SHA256
+# --- Função: Obter hash SHA256 de um arquivo
 function Get-FileHashValue($filePath) {
     if (Test-Path $filePath) {
         return (Get-FileHash -Algorithm SHA256 -Path $filePath).Hash
@@ -56,14 +56,12 @@ function Get-FileHashValue($filePath) {
     }
 }
 
-# --- Função: Obter hash remoto do GitHub
+# --- Função: Obter hash remoto do GitHub (binário)
 function Get-RemoteFileHash($url) {
     try {
         $bytes = (Invoke-WebRequest -Uri $url -UseBasicParsing).Content
-        $stream = New-Object IO.MemoryStream
-        $writer = New-Object IO.StreamWriter($stream)
-        $writer.Write($bytes)
-        $writer.Flush()
+        $stream = New-Object System.IO.MemoryStream
+        $stream.Write($bytes, 0, $bytes.Length)
         $stream.Position = 0
         $hash = (Get-FileHash -Algorithm SHA256 -InputStream $stream).Hash
         $stream.Dispose()
@@ -80,10 +78,10 @@ if (-not (Test-InternetConnection)) {
     Write-Host "[🌐] Conexão com a Internet detectada." -ForegroundColor Cyan
 }
 
-# --- Verifica e baixa/atualiza arquivos
+# --- Verifica e baixa/atualiza arquivos necessários
 foreach ($arquivo in $arquivos) {
     $caminhoLocal = Join-Path $scriptDir $arquivo
-    $urlRemota = "$baseURL/$arquivo"
+    $urlRemota = "$baseURL/" + [System.Uri]::EscapeDataString($arquivo)
 
     if (Test-Path $caminhoLocal) {
         Write-Host "[🔍] Verificando atualizações para $arquivo..." -ForegroundColor Yellow
@@ -96,6 +94,7 @@ foreach ($arquivo in $arquivos) {
                 Write-Host "[⬆️] Atualização encontrada para $arquivo. Baixando nova versão..." -ForegroundColor Cyan
                 try {
                     Invoke-WebRequest -Uri $urlRemota -OutFile $caminhoLocal -UseBasicParsing
+                    Unblock-File -Path $caminhoLocal
                     Write-Host "[✔] $arquivo atualizado com sucesso!" -ForegroundColor Green
                 } catch {
                     Write-Host "[❌] Falha ao atualizar $arquivo." -ForegroundColor Red
@@ -112,6 +111,7 @@ foreach ($arquivo in $arquivos) {
             Write-Host "[🌐] Baixando de: $urlRemota" -ForegroundColor Cyan
             try {
                 Invoke-WebRequest -Uri $urlRemota -OutFile $caminhoLocal -UseBasicParsing
+                Unblock-File -Path $caminhoLocal
                 Write-Host "[✔] $arquivo baixado com sucesso!" -ForegroundColor Green
             } catch {
                 Write-Host "[❌] Falha ao baixar $arquivo. Verifique o link no GitHub." -ForegroundColor Red
@@ -120,18 +120,32 @@ foreach ($arquivo in $arquivos) {
             Write-Host "[❌] Não foi possível baixar $arquivo sem conexão com a Internet." -ForegroundColor Red
         }
     }
+
     Write-Host ""
     Start-Sleep -Milliseconds 500
 }
 
-# --- Função auxiliar para executar ferramentas
+# --- Função auxiliar para executar ferramentas .exe
 function Run-Tool($name, $file) {
     Write-Host "[🔹] Executando $name..." -ForegroundColor Yellow
     try {
-        Start-Process -FilePath "$scriptDir\$file" -Wait -ErrorAction Stop
+        $fullPath = Join-Path $scriptDir $file
+        if (-not (Test-Path $fullPath)) {
+            Write-Host "[❌] Arquivo não encontrado: $file" -ForegroundColor Red
+            return
+        }
+
+        # Garante que o arquivo esteja desbloqueado
+        Unblock-File -Path $fullPath
+
+        # Executa o programa sem fechar o PowerShell
+        $process = Start-Process -FilePath $fullPath -PassThru -ErrorAction Stop
+        $process.WaitForExit()
+
         Write-Host "[✔] $name concluído com sucesso!" -ForegroundColor Green
     } catch {
         Write-Host "[❌] Falha ao executar $name ($file)" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor DarkGray
     }
     Write-Host ""
     Start-Sleep -Seconds 1
