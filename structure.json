@@ -1,90 +1,90 @@
-﻿[
-    {
-        "categoria":  "Contas de Usuario",
-        "subpasta":  "Alterar senha Administrador",
-        "script":  "Administrador.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Contas de Usuario/Alterar senha Administrador/Administrador.ps1",
-        "descricao":  "Administrador.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Contas de Usuario/Alterar senha Administrador/Administrador.txt"
-    },
-    {
-        "categoria":  "Contas de Usuario",
-        "subpasta":  "Controle Conta de Usuario",
-        "script":  "Controle Conta Usuario.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Contas de Usuario/Controle Conta de Usuario/Controle Conta Usuario.ps1",
-        "descricao":  "Controle Conta Usuario.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Contas de Usuario/Controle Conta de Usuario/Controle Conta Usuario.txt"
-    },
-    {
-        "categoria":  "Limpeza",
-        "subpasta":  "Limpeza Temp",
-        "script":  "Limpeza.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Limpeza/Limpeza Temp/Limpeza.ps1",
-        "descricao":  "Limpeza.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Limpeza/Limpeza Temp/Limpeza.txt"
-    },
-    {
-        "categoria":  "Otimização",
-        "subpasta":  "Alterar Plano de energia",
-        "script":  "Plano de energia.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Alterar Plano de energia/Plano de energia.ps1",
-        "descricao":  "Plano de energia.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Alterar Plano de energia/Plano de energia.txt"
-    },
-    {
-        "categoria":  "Otimização",
-        "subpasta":  "Atuaização Windows",
-        "script":  "Atualizar Windows.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Atuaização Windows/Atualizar Windows.ps1",
-        "descricao":  "Atualizar Windows.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Atuaização Windows/Atualizar Windows.txt"
-    },
-    {
-        "categoria":  "Otimização",
-        "subpasta":  "Desinstalar Programas",
-        "script":  "Programas.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Desinstalar Programas/Programas.ps1",
-        "descricao":  "Programas.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Desinstalar Programas/Programas.txt"
-    },
-    {
-        "categoria":  "Otimização",
-        "subpasta":  "Icones na area de trabalho",
-        "script":  "Icone.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Icones na area de trabalho/Icone.ps1",
-        "descricao":  "Icone.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Icones na area de trabalho/Icone.txt"
-    },
-    {
-        "categoria":  "Otimização",
-        "subpasta":  "Remover Impressoras",
-        "script":  "Impressoras.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Remover Impressoras/Impressoras.ps1",
-        "descricao":  "Impressoras.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Remover Impressoras/Impressoras.txt"
-    },
-    {
-        "categoria":  "Otimização",
-        "subpasta":  "Sfc Scannow",
-        "script":  "Sfc.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Sfc Scannow/Sfc.ps1",
-        "descricao":  "Sfc.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimização/Sfc Scannow/Sfc.txt"
-    },
-    {
-        "categoria":  "Rede",
-        "subpasta":  "Flush DNS",
-        "script":  "Flush DNS.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Rede/Flush DNS/Flush DNS.ps1",
-        "descricao":  "Flush DNS.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Rede/Flush DNS/Flush DNS.txt"
-    },
-    {
-        "categoria":  "Rede",
-        "subpasta":  "Remover Ipv6",
-        "script":  "Ipv6.ps1",
-        "script_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Rede/Remover Ipv6/Ipv6.ps1",
-        "descricao":  "Ipv6.txt",
-        "descricao_url":  "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Rede/Remover Ipv6/Ipv6.txt"
-    }
+[
+  {
+    "categoria": "Contas de Usuario",
+    "subpasta": "Alterar senha Administrador",
+    "script": "Administrador.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Contas%20de%20Usuario/Alterar%20senha%20Administrador/Administrador.ps1",
+    "descricao": "Administrador.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Contas%20de%20Usuario/Alterar%20senha%20Administrador/Administrador.txt"
+  },
+  {
+    "categoria": "Contas de Usuario",
+    "subpasta": "Controle Conta de Usuario",
+    "script": "Controle Conta Usuario.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Contas%20de%20Usuario/Controle%20Conta%20de%20Usuario/Controle%20Conta%20Usuario.ps1",
+    "descricao": "Controle Conta Usuario.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Contas%20de%20Usuario/Controle%20Conta%20de%20Usuario/Controle%20Conta%20Usuario.txt"
+  },
+  {
+    "categoria": "Limpeza",
+    "subpasta": "Limpeza Temp",
+    "script": "Limpeza.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Limpeza/Limpeza%20Temp/Limpeza.ps1",
+    "descricao": "Limpeza.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Limpeza/Limpeza%20Temp/Limpeza.txt"
+  },
+  {
+    "categoria": "Otimização",
+    "subpasta": "Alterar Plano de energia",
+    "script": "Plano de energia.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Alterar%20Plano%20de%20energia/Plano%20de%20energia.ps1",
+    "descricao": "Plano de energia.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Alterar%20Plano%20de%20energia/Plano%20de%20energia.txt"
+  },
+  {
+    "categoria": "Otimização",
+    "subpasta": "Atuaização Windows",
+    "script": "Atualizar Windows.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Atuaiza%C3%A7%C3%A3o%20Windows/Atualizar%20Windows.ps1",
+    "descricao": "Atualizar Windows.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Atuaiza%C3%A7%C3%A3o%20Windows/Atualizar%20Windows.txt"
+  },
+  {
+    "categoria": "Otimização",
+    "subpasta": "Desinstalar Programas",
+    "script": "Programas.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Desinstalar%20Programas/Programas.ps1",
+    "descricao": "Programas.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Desinstalar%20Programas/Programas.txt"
+  },
+  {
+    "categoria": "Otimização",
+    "subpasta": "Icones na area de trabalho",
+    "script": "Icone.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Icones%20na%20area%20de%20trabalho/Icone.ps1",
+    "descricao": "Icone.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Icones%20na%20area%20de%20trabalho/Icone.txt"
+  },
+  {
+    "categoria": "Otimização",
+    "subpasta": "Remover Impressoras",
+    "script": "Impressoras.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Remover%20Impressoras/Impressoras.ps1",
+    "descricao": "Impressoras.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Remover%20Impressoras/Impressoras.txt"
+  },
+  {
+    "categoria": "Otimização",
+    "subpasta": "Sfc Scannow",
+    "script": "Sfc.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Sfc%20Scannow/Sfc.ps1",
+    "descricao": "Sfc.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Sfc%20Scannow/Sfc.txt"
+  },
+  {
+    "categoria": "Rede",
+    "subpasta": "Flush DNS",
+    "script": "Flush DNS.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Rede/Flush%20DNS/Flush%20DNS.ps1",
+    "descricao": "Flush DNS.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Rede/Flush%20DNS/Flush%20DNS.txt"
+  },
+  {
+    "categoria": "Rede",
+    "subpasta": "Remover Ipv6",
+    "script": "Ipv6.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Rede/Remover%20Ipv6/Ipv6.ps1",
+    "descricao": "Ipv6.txt",
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Rede/Remover%20Ipv6/Ipv6.txt"
+  }
 ]
