@@ -12,17 +12,6 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $logFile = "$env:TEMP\LimpezaGeset.log"
 function Write-Log { param($msg) Add-Content -Path $logFile -Value ("$(Get-Date -Format 'HH:mm:ss') - $msg"); Write-Host $msg }
 
-# --- Verifica se está rodando como administrador ---
-$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Log "[⚙️] Elevando permissões para Administrador..."
-    # Sempre abrir visível
-    Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`"" -Verb RunAs
-    exit
-} else {
-    Write-Log "[✔] Já executando como Administrador."
-}
-
 # --- Configuração visual ---
 $host.UI.RawUI.WindowTitle = "🧹 Utilitário de Limpeza do Sistema - Geset"
 Clear-Host

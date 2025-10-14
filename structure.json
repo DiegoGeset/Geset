@@ -24,52 +24,52 @@
     "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Limpeza/Limpeza%20Temp/Limpeza.txt"
   },
   {
-    "categoria": "Otimização",
+    "categoria": "Otimizacao",
     "subpasta": "Alterar Plano de energia",
     "script": "Plano de energia.ps1",
-    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Alterar%20Plano%20de%20energia/Plano%20de%20energia.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Alterar%20Plano%20de%20energia/Plano%20de%20energia.ps1",
     "descricao": "Plano de energia.txt",
-    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Alterar%20Plano%20de%20energia/Plano%20de%20energia.txt"
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Alterar%20Plano%20de%20energia/Plano%20de%20energia.txt"
   },
   {
-    "categoria": "Otimização",
-    "subpasta": "Atuaização Windows",
+    "categoria": "Otimizacao",
+    "subpasta": "Atualizacao Windows",
     "script": "Atualizar Windows.ps1",
-    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Atuaiza%C3%A7%C3%A3o%20Windows/Atualizar%20Windows.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Atualizacao%20Windows/Atualizar%20Windows.ps1",
     "descricao": "Atualizar Windows.txt",
-    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Atuaiza%C3%A7%C3%A3o%20Windows/Atualizar%20Windows.txt"
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Atualizacao%20Windows/Atualizar%20Windows.txt"
   },
   {
-    "categoria": "Otimização",
+    "categoria": "Otimizacao",
     "subpasta": "Desinstalar Programas",
     "script": "Programas.ps1",
-    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Desinstalar%20Programas/Programas.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Desinstalar%20Programas/Programas.ps1",
     "descricao": "Programas.txt",
-    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Desinstalar%20Programas/Programas.txt"
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Desinstalar%20Programas/Programas.txt"
   },
   {
-    "categoria": "Otimização",
+    "categoria": "Otimizacao",
     "subpasta": "Icones na area de trabalho",
     "script": "Icone.ps1",
-    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Icones%20na%20area%20de%20trabalho/Icone.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Icones%20na%20area%20de%20trabalho/Icone.ps1",
     "descricao": "Icone.txt",
-    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Icones%20na%20area%20de%20trabalho/Icone.txt"
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Icones%20na%20area%20de%20trabalho/Icone.txt"
   },
   {
-    "categoria": "Otimização",
+    "categoria": "Otimizacao",
     "subpasta": "Remover Impressoras",
     "script": "Impressoras.ps1",
-    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Remover%20Impressoras/Impressoras.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Remover%20Impressoras/Impressoras.ps1",
     "descricao": "Impressoras.txt",
-    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Remover%20Impressoras/Impressoras.txt"
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Remover%20Impressoras/Impressoras.txt"
   },
   {
-    "categoria": "Otimização",
+    "categoria": "Otimizacao",
     "subpasta": "Sfc Scannow",
     "script": "Sfc.ps1",
-    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Sfc%20Scannow/Sfc.ps1",
+    "script_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Sfc%20Scannow/Sfc.ps1",
     "descricao": "Sfc.txt",
-    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimiza%C3%A7%C3%A3o/Sfc%20Scannow/Sfc.txt"
+    "descricao_url": "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Otimizacao/Sfc%20Scannow/Sfc.txt"
   },
   {
     "categoria": "Rede",
