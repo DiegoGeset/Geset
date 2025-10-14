@@ -1,6 +1,7 @@
 # ===============================
 # GESET Launcher - Interface WPF (Tema Escuro + Ocultação e Elevação)
 # Usa JSON remoto (structure.json) como fonte da estrutura do repositório
+# Monta URLs raw com EscapeDataString por segmento (corrige espaços e caracteres especiais)
 # ===============================
 
 # --- Oculta a janela do PowerShell ---
@@ -112,7 +113,8 @@ function Update-StructureJson {
 
 # ===============================
 # Função: Lê estrutura do JSON local e normaliza objetos
-# Formato esperado do JSON: array de objetos { Category, Sub, ScriptName }
+# Formato esperado do JSON: array de objetos { categoria, subpasta, script, descricao }
+# (mantemos compatibilidade com nomes de campos em português)
 # ===============================
 function Get-StructureFromJson {
     param([string]$jsonPath)
@@ -122,10 +124,17 @@ function Get-StructureFromJson {
         if ($null -eq $jsonContent) { return @() }
         $list = @()
         foreach ($item in $jsonContent) {
-            $cat = $item.Category
-            $sub = $item.Sub
-            $script = $item.ScriptName
-            $list += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $script }
+            # aceita tanto campos em português quanto em inglês (Category/Sub/ScriptName)
+            $cat = $item.categoria
+            if ($null -eq $cat) { $cat = $item.Category }
+            $sub = $item.subpasta
+            if ($null -eq $sub) { $sub = $item.Sub }
+            $script = $item.script
+            if ($null -eq $script) { $script = $item.ScriptName }
+            $desc = $item.descricao
+            if ($null -eq $desc) { $desc = $item.Description }
+
+            $list += [PSCustomObject]@{ Category = $cat; Sub = $sub; ScriptName = $script; Description = $desc }
         }
         return $list
     } catch {
@@ -158,7 +167,7 @@ function Ensure-LocalStructure {
 
 # ===============================
 # Função: Baixa script .ps1 (raw) para cache local e executa em nova janela elevada
-# - mantém comportamento original: sempre tenta baixar e substituir local antes de executar
+# - Sempre monta o rawUrl por segmento com EscapeDataString (evita links "bugados")
 # ===============================
 function Ensure-ScriptLocalAndExecute {
     param([string]$Category, [string]$Sub, [string]$ScriptName)
@@ -170,7 +179,12 @@ function Ensure-ScriptLocalAndExecute {
     }
 
     $localScript = Join-Path $localDir $ScriptName
-    $rawUrl = "$GitHubRawBase/$([System.Uri]::EscapeDataString($Category))/$([System.Uri]::EscapeDataString($Sub))/$([System.Uri]::EscapeDataString($ScriptName))"
+
+    # Monta raw URL com escape para cada segmento
+    $catEsc = [System.Uri]::EscapeDataString($Category)
+    $subEsc = [System.Uri]::EscapeDataString($Sub)
+    $scriptEsc = [System.Uri]::EscapeDataString($ScriptName)
+    $rawUrl = "$GitHubRawBase/$catEsc/$subEsc/$scriptEsc"
 
     $downloaded = $false
     try {
@@ -201,9 +215,6 @@ function Ensure-ScriptLocalAndExecute {
 
 # ===============================
 # Funções utilitárias originais mantidas
-# - Run-ScriptElevated: tenta transformar caminho local em Category/Sub/Script e executar
-# - Get-InfoText: tenta obter .txt do raw (GitHub) ou local
-# - Show-InfoWindow: mostra janela com texto
 # ===============================
 function Run-ScriptElevated($scriptPath) {
     if ($scriptPath -and $scriptPath.StartsWith($LocalCache) -and -not (Test-Path $scriptPath)) {
@@ -572,7 +583,12 @@ function Load-Tabs {
                 $infoText = "Nenhuma documentação encontrada para este script."
                 try {
                     if ($meta -and $meta.Category -and $meta.Sub -and $meta.ScriptName) {
-                        $rawTxtUrl = "$GitHubRawBase/$([System.Uri]::EscapeDataString($meta.Category))/$([System.Uri]::EscapeDataString($meta.Sub))/$([System.Uri]::EscapeDataString([System.IO.Path]::ChangeExtension($meta.ScriptName, '.txt')))"
+                        # monta URL do txt com escape por segmento
+                        $catEsc = [System.Uri]::EscapeDataString($meta.Category)
+                        $subEsc = [System.Uri]::EscapeDataString($meta.Sub)
+                        $txtName = [System.IO.Path]::ChangeExtension($meta.ScriptName, '.txt')
+                        $txtEsc = [System.Uri]::EscapeDataString($txtName)
+                        $rawTxtUrl = "$GitHubRawBase/$catEsc/$subEsc/$txtEsc"
                         try {
                             $content = Invoke-RestMethod -Uri $rawTxtUrl -Headers $Global:GitHubHeaders -ErrorAction Stop
                             if ($null -ne $content) { $infoText = $content.ToString() }
