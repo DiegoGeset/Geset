@@ -1,7 +1,7 @@
 ﻿# ============================================================
 # Script: Execução Sequencial de Limpezas do Sistema
 # Função: Executa utilitários de limpeza (Prefetch, Lixeira, Edge, Chrome)
-# Autor: Geset
+# Autor : Geset
 # ============================================================
 
 # --- Verifica se está rodando como administrador
