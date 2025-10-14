@@ -1,6 +1,6 @@
 ﻿# ============================================================
-# Script: Execução Sequencial de Limpezas do Sistema
-# Função: Executa utilitários de limpeza (Prefetch, Lixeira, Edge, Chrome)
+# Script: Execução Sequencial de Limpezas do Sistema (GitHub)
+# Função: Baixa e executa utilitários de limpeza via repositório remoto
 # Autor : Geset
 # ============================================================
 
@@ -20,22 +20,40 @@ Write-Host "           🧹 UTILITÁRIO DE LIMPEZA DO SISTEMA              " -Fo
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Caminho do diretório atual (onde o script está)
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+# --- Repositório base (RAW)
+$baseUrl = "https://raw.githubusercontent.com/DiegoGeset/Geset/main/Limpeza/Limpeza%20Temp"
 
-# --- Função auxiliar para exibir status
+# --- Caminho temporário para download
+$tempDir = "$env:TEMP\GesetLimpeza"
+if (-not (Test-Path $tempDir)) { New-Item -ItemType Directory -Path $tempDir | Out-Null }
+
+# --- Função auxiliar para baixar e executar os arquivos
 function Run-Tool($name, $file) {
+    $remoteFile = "$baseUrl/$file"
+    $localFile = Join-Path $tempDir $file
+
+    Write-Host "[🔹] Baixando $name..." -ForegroundColor Yellow
+    try {
+        Invoke-WebRequest -Uri $remoteFile -OutFile $localFile -UseBasicParsing -ErrorAction Stop
+        Write-Host "[✔] Download concluído: $file" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[❌] Falha ao baixar $file do GitHub" -ForegroundColor Red
+        return
+    }
+
     Write-Host "[🔹] Executando $name..." -ForegroundColor Yellow
     try {
-        Start-Process -FilePath "$scriptDir\$file" -Wait -ErrorAction Stop
+        Start-Process -FilePath $localFile -Wait -ErrorAction Stop
         Write-Host "[✔] $name concluído com sucesso!" -ForegroundColor Green
     }
     catch {
         Write-Host "[❌] Falha ao executar $name ($file)" -ForegroundColor Red
     }
+
     Write-Host ""
     Start-Sleep -Seconds 1
-} # <--- Aqui fecha corretamente a função (nenhum '}' a mais depois disso!)
+}
 
 # --- Execução das ferramentas
 Run-Tool "Limpeza de Prefetch" "LimpezaPrefetch.exe"
@@ -49,3 +67,6 @@ Write-Host "🎉 Todas as limpezas foram concluídas com sucesso!" -ForegroundCo
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 Read-Host "Pressione [ENTER] para sair"
+
+# --- (Opcional) Limpeza dos arquivos baixados
+# Remove-Item -Path $tempDir -Recurse -Force
