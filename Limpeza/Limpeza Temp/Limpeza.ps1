@@ -2,7 +2,7 @@
 # Script: Execução Sequencial de Limpezas do Sistema
 # Função: Executa utilitários de limpeza (Prefetch, Lixeira, Edge, Chrome)
 # Autor: Geset
-# Execução sempre visível
+# Execução sempre visual
 # ============================================================
 
 # --- Caminho do diretório atual ---
@@ -53,7 +53,7 @@ function Get-FileHashValue($filePath) {
     }
 }
 
-# --- Função: Obter hash remoto do GitHub (binário) ---
+# --- Função: Obter hash remoto do GitHub ---
 function Get-RemoteFileHash($url) {
     try {
         $bytes = (Invoke-WebRequest -Uri $url -UseBasicParsing).Content
@@ -69,60 +69,60 @@ function Get-RemoteFileHash($url) {
 }
 
 # --- Verificação de conexão ---
-if (-not (Test-InternetConnection)) {
+$internetOk = Test-InternetConnection
+if (-not $internetOk) {
     Write-Host "[⚠️] Sem conexão com a Internet. Verificação de atualização será ignorada." -ForegroundColor Yellow
 } else {
     Write-Host "[🌐] Conexão com a Internet detectada." -ForegroundColor Cyan
 }
 
-# --- Verifica e baixa/atualiza arquivos necessários ---
+# --- Baixa ou atualiza arquivos ---
 foreach ($arquivo in $arquivos) {
     $caminhoLocal = Join-Path $scriptDir $arquivo
     $urlRemota = "$baseURL/" + [System.Uri]::EscapeDataString($arquivo)
 
-    if (Test-Path $caminhoLocal) {
-        Write-Host "[🔍] Verificando atualizações para $arquivo..." -ForegroundColor Yellow
+    try {
+        if (Test-Path $caminhoLocal) {
+            Write-Host "[🔍] Verificando atualizações para $arquivo..." -ForegroundColor Yellow
 
-        if (Test-InternetConnection) {
-            $hashLocal = Get-FileHashValue $caminhoLocal
-            $hashRemoto = Get-RemoteFileHash $urlRemota
+            if ($internetOk) {
+                $hashLocal = Get-FileHashValue $caminhoLocal
+                $hashRemoto = Get-RemoteFileHash $urlRemota
 
-            if ($hashRemoto -and $hashLocal -ne $hashRemoto) {
-                Write-Host "[⬆️] Atualização encontrada para $arquivo. Baixando nova versão..." -ForegroundColor Cyan
-                try {
-                    Invoke-WebRequest -Uri $urlRemota -OutFile $caminhoLocal -UseBasicParsing
+                if ($hashRemoto -and $hashLocal -ne $hashRemoto) {
+                    Write-Host "[⬆️] Atualização encontrada para $arquivo. Baixando nova versão..." -ForegroundColor Cyan
+                    Invoke-WebRequest -Uri $urlRemota -OutFile $caminhoLocal -UseBasicParsing -ErrorAction Stop
                     Unblock-File -Path $caminhoLocal
                     Write-Host "[✔] $arquivo atualizado com sucesso!" -ForegroundColor Green
-                } catch {
-                    Write-Host "[❌] Falha ao atualizar $arquivo." -ForegroundColor Red
+                } else {
+                    Write-Host "[✔] $arquivo está atualizado." -ForegroundColor Green
                 }
             } else {
-                Write-Host "[✔] $arquivo está atualizado." -ForegroundColor Green
+                Write-Host "[⚠️] Sem internet. Não foi possível verificar atualização de $arquivo." -ForegroundColor Yellow
             }
         } else {
-            Write-Host "[⚠️] Sem internet. Não foi possível verificar atualização de $arquivo." -ForegroundColor Yellow
-        }
-    } else {
-        Write-Host "[⬇️] Arquivo não encontrado: $arquivo" -ForegroundColor Yellow
-        if (Test-InternetConnection) {
-            Write-Host "[🌐] Baixando de: $urlRemota" -ForegroundColor Cyan
-            try {
-                Invoke-WebRequest -Uri $urlRemota -OutFile $caminhoLocal -UseBasicParsing
+            Write-Host "[⬇️] Arquivo não encontrado localmente: $arquivo" -ForegroundColor Yellow
+            if ($internetOk) {
+                Write-Host "[🌐] Baixando de: $urlRemota" -ForegroundColor Cyan
+                Invoke-WebRequest -Uri $urlRemota -OutFile $caminhoLocal -UseBasicParsing -ErrorAction Stop
                 Unblock-File -Path $caminhoLocal
                 Write-Host "[✔] $arquivo baixado com sucesso!" -ForegroundColor Green
-            } catch {
-                Write-Host "[❌] Falha ao baixar $arquivo. Verifique o link no GitHub." -ForegroundColor Red
+            } else {
+                Write-Host "[❌] Não foi possível baixar $arquivo sem conexão." -ForegroundColor Red
             }
-        } else {
-            Write-Host "[❌] Não foi possível baixar $arquivo sem conexão com a Internet." -ForegroundColor Red
         }
+    } catch {
+        Write-Host "[❌] Falha ao processar $arquivo. Detalhe:" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor DarkGray
     }
 
     Start-Sleep -Milliseconds 500
 }
 
-# --- Desbloqueia todos os executáveis ---
-Get-ChildItem $scriptDir\*.exe | ForEach-Object { Unblock-File -Path $_.FullName }
+# --- Garante que os arquivos estejam desbloqueados ---
+Get-ChildItem $scriptDir -Filter "*.exe" | ForEach-Object {
+    try { Unblock-File -Path $_.FullName } catch {}
+}
 
 # --- Função auxiliar para executar ferramentas .exe ---
 function Run-Tool($name, $file) {
@@ -134,11 +134,13 @@ function Run-Tool($name, $file) {
             return
         }
 
-        # Executa o programa e aguarda término
-        $process = Start-Process -FilePath $fullPath -PassThru -ErrorAction Stop
-        $process.WaitForExit()
-
-        Write-Host "[✔] $name concluído com sucesso!" -ForegroundColor Green
+        # Executa e aguarda término (garantido)
+        $proc = Start-Process -FilePath $fullPath -Wait -PassThru -ErrorAction Stop
+        if ($proc.ExitCode -eq 0) {
+            Write-Host "[✔] $name concluído com sucesso!" -ForegroundColor Green
+        } else {
+            Write-Host "[⚠️] $name terminou com código $($proc.ExitCode)." -ForegroundColor Yellow
+        }
     } catch {
         Write-Host "[❌] Falha ao executar $name ($file)" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor DarkGray
@@ -153,11 +155,10 @@ Run-Tool "Limpeza do Edge" "LimpezaEdge.exe"
 Run-Tool "Limpeza do Chrome" "LimpezaChrome.exe"
 
 # --- Conclusão ---
+Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "🎉 Todas as limpezas foram concluídas com sucesso!" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Cyan
-
-# --- Mantém a janela aberta ---
 Write-Host ""
 Write-Host "Pressione [ENTER] para fechar o utilitário..." -ForegroundColor Yellow
 Read-Host
