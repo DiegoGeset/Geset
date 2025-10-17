@@ -19,15 +19,28 @@ $consolePtr = [PInvoke.Win32]::GetConsoleWindow()
 # --- Verifica se está em modo Administrador ---
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Add-Type -AssemblyName PresentationFramework
-    [System.Windows.MessageBox]::Show("O Launcher precisa ser executado como Administrador.`nEle será reiniciado com permissões elevadas.", "Permissão necessária", "OK", "Warning")
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "powershell.exe"
-    $psi.Arguments = "-ExecutionPolicy Bypass -File `"$PSCommandPath`""
-    $psi.Verb = "runas"
-    [System.Diagnostics.Process]::Start($psi) | Out-Null
+    # Reinicia o próprio script com elevação e com bypass da política de execução,
+    # sem exibir mensagem: o processo atual encerra depois de disparar a elevação.
+    $psExe = (Get-Command powershell.exe).Source
+    # Use $PSCommandPath se disponível; fallback para o arquivo em execução via MyInvocation
+    if (-not $PSCommandPath) {
+        $scriptPath = $MyInvocation.MyCommand.Definition
+    } else {
+        $scriptPath = $PSCommandPath
+    }
+
+    # Monta os argumentos: bypass de política, sem profile, janela oculta, e o caminho do arquivo
+    $arg = "-ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden -File `"$scriptPath`""
+
+    # Inicia o PowerShell elevado (runas). Start-Process por padrão cria uma nova janela,
+    # mas passamos WindowStyle Hidden no argumento para que o novo processo fique oculto.
+    Start-Process -FilePath $psExe -ArgumentList $arg -Verb RunAs
+
+    # Sai do processo atual para evitar execuções duplicadas
     exit
 }
+
+# Se chegou aqui, já está em modo Administrador (continua o restante do script...)
 
 # ===============================
 # Dependências principais
